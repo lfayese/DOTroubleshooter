@@ -173,3 +173,34 @@
 }.
 [2025-03-26 17:02:26] [Info] Cleaning up build artifacts...
 [2025-03-26 17:02:26] [Success] Cleanup completed
+[2025-03-26 17:07:46] [Info] Build process started
+[2025-03-26 17:07:46] [Info] Checking build prerequisites...
+[2025-03-26 17:07:47] [Success] Prerequisites check completed
+[2025-03-26 17:07:47] [Info] Importing package configuration from D:\do\DOTroubleshooterWin32\Package.psd1
+[2025-03-26 17:07:47] [Info] Generated JSON configuration at D:\do\DOTroubleshooterWin32\Package.psd1.json
+[2025-03-26 17:07:47] [Info] Using provided certificate password
+[2025-03-26 17:07:47] [Info] Testing certificate at .\CodeSigning\CodeSigningCert.pfx
+[2025-03-26 17:07:47] [Error] Certificate test failed: Exception calling "Import" with "3" argument(s): "X509Certificate is immutable on this platform. Use the equivalent constructor instead."
+[2025-03-26 17:07:47] [Warning] Certificate validation failed, proceeding without signing
+[2025-03-26 17:07:47] [Info] Starting build process...
+[2025-03-26 17:07:47] [Info] Created output directory: D:\do\DOTroubleshooterWin32\out
+[2025-03-26 17:07:48] [Info] Building with PowerShell Pro Tools...
+[2025-03-26 17:07:48] [Error] Build failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:07:48] [Error] Build process failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:07:48] [Info] Cleaning up build artifacts...
+[2025-03-26 17:07:48] [Success] Cleanup completed
+[2025-03-26 17:08:44] [Info] Build process started
+[2025-03-26 17:08:44] [Info] Checking build prerequisites...
+[2025-03-26 17:08:44] [Success] Prerequisites check completed
+[2025-03-26 17:08:45] [Info] Importing package configuration from D:\do\DOTroubleshooterWin32\Package.psd1
+[2025-03-26 17:08:45] [Info] Generated JSON configuration at D:\do\DOTroubleshooterWin32\Package.psd1.json
+[2025-03-26 17:08:45] [Info] Using provided certificate password
+[2025-03-26 17:08:45] [Info] Testing certificate at .\CodeSigning\CodeSigningCert.pfx
+[2025-03-26 17:08:45] [Error] Certificate test failed: Exception calling "Import" with "3" argument(s): "X509Certificate is immutable on this platform. Use the equivalent constructor instead."
+[2025-03-26 17:08:45] [Warning] Certificate validation failed, proceeding without signing
+[2025-03-26 17:08:45] [Info] Starting build process...
+[2025-03-26 17:08:45] [Info] Building with PowerShell Pro Tools...
+[2025-03-26 17:08:45] [Error] Build failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:08:45] [Error] Build process failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:08:45] [Info] Cleaning up build artifacts...
+[2025-03-26 17:08:45] [Success] Cleanup completed
