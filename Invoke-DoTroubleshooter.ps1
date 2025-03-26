@@ -25,9 +25,16 @@
 .PARAMETER Show
   Optional. If specified, the script automatically opens the generated Excel report upon completion.
 
+.PARAMETER DiagnosticsZip
+  Optional. Path to a diagnostics zip file containing Delivery Optimization logs for analysis.
+
 .EXAMPLE
-  .\Invoke-DoTroubleshooter_v4.ps1 -OutputPath "C:\DOReports" -Show
+  .\Invoke-DoTroubleshooter.ps1 -OutputPath "C:\DOReports" -Show
   Runs the complete DO troubleshooting process, saves the report to "C:\DOReports", and opens the Excel report after processing.
+
+.EXAMPLE
+  .\Invoke-DoTroubleshooter.ps1 -DiagnosticsZip "C:\Path\To\DiagnosticsFile.zip" -Show
+  Processes a diagnostics zip file and includes the findings in the report.
 
 .NOTES
   - Requires PowerShell 5 or newer.
@@ -51,7 +58,8 @@
 
 param (
   [string]$OutputPath = [Environment]::GetFolderPath("Desktop"),
-  [switch]$Show
+  [switch]$Show,
+  [string]$DiagnosticsZip
 )
 
 # Use bundled ImportExcel if not available
@@ -76,6 +84,7 @@ $Buffers = @{
   Peers       = [System.Collections.ArrayList]::new()
   Summary     = [System.Collections.ArrayList]::new() # New buffer for summary information
   Recommendations = [System.Collections.ArrayList]::new() # New buffer for recommendations
+  DiagnosticsData = [System.Collections.ArrayList]::new() # New buffer for diagnostic data
 }
 
 # ───── LOGGING FUNCTION ─────
@@ -556,7 +565,7 @@ function Test-PeerConnectivity {
 function Test-MCCCheck {
   Write-Log "Checking MCC (Microsoft Connected Cache)..." "INFO" "MCC"
   Show-Progress -Activity "Checking Microsoft Connected Cache" -PercentComplete 70
-    try {
+  try {
     $diag = Get-DOConfig -Verbose
 
     # Create a more structured and readable version of the MCC configuration
@@ -979,6 +988,7 @@ function Export-DOExcelReport {
   $Buffers.DOConfig | Export-Excel -Path $excelPath -WorksheetName "DO Configuration" -AutoSize -TableStyle Medium5 -Append
   $Buffers.Errors | Export-Excel -Path $excelPath -WorksheetName "Errors" -AutoSize -TableStyle Medium3 -Append
   $Buffers.Log | Export-Excel -Path $excelPath -WorksheetName "Execution Log" -AutoSize -TableStyle Light8 -Append
+  $Buffers.DiagnosticsData | Export-Excel -Path $excelPath -WorksheetName "Diagnostics Data" -AutoSize -TableStyle Medium4 -Append
 
   try {
     # Export DO error codes with enhanced information
@@ -1006,8 +1016,160 @@ function Export-DOExcelReport {
   if ($Show) { Invoke-Item $excelPath }
   Write-Host "`n📊 Report saved to: $excelPath" -ForegroundColor Cyan
   Write-Host "📋 CSV data exported to: $csvFolder" -ForegroundColor Cyan
-
   return $excelPath
+}
+
+# ───── EXTRACT DIAGNOSTICS ZIP ─────
+function Extract-DiagnosticsZip {
+  param (
+    [string]$ZipPath,
+    [string]$ExtractPath
+  )
+  Write-Log "Extracting diagnostics zip file..." "INFO"
+  Show-Progress -Activity "Extracting diagnostics zip" -PercentComplete 5
+
+  try {
+    # Create extraction directory if it doesn't exist
+    if (-not (Test-Path -Path $ExtractPath -PathType Container)) {
+      New-Item -Path $ExtractPath -ItemType Directory -Force | Out-Null
+    }
+
+    # Extract the zip file
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $ExtractPath)
+    Write-Log "Diagnostics zip extracted to $ExtractPath" "SUCCESS"
+    return $true
+  } catch {
+    Write-Log "Error extracting diagnostics zip: $_" "ERROR"
+    return $false
+  }
+}
+
+# ───── PROCESS DIAGNOSTICS DATA ─────
+function Process-DiagnosticsData {
+  param (
+    [string]$DiagnosticsPath
+  )
+  Write-Log "Processing diagnostics data from extracted folder..." "INFO"
+  Show-Progress -Activity "Processing diagnostics data" -PercentComplete 15
+
+  try {
+    # Look for DO-related files in the diagnostics folder
+    $doFiles = Get-ChildItem -Path $DiagnosticsPath -Recurse -File | Where-Object {
+      $_.Name -match "DeliveryOptimization|DOSvc|DO_" -or 
+      $_.FullName -match "\\Windows\\Logs\\DISM\\|\\WindowsUpdate\\|\\Microsoft-Windows-DeliveryOptimization"
+    }
+
+    if ($doFiles.Count -eq 0) {
+      Write-Log "No Delivery Optimization related files found in diagnostics package" "WARN"
+      return
+    }
+
+    Write-Log "Found $($doFiles.Count) DO-related files in diagnostics package" "SUCCESS"
+
+    # Process each file based on type
+    foreach ($file in $doFiles) {
+      $fileInfo = [PSCustomObject]@{
+        FileName = $file.Name
+        FilePath = $file.FullName
+        FileSize = "{0:N2} KB" -f ($file.Length / 1KB)
+        LastWriteTime = $file.LastWriteTime
+        Category = "Unknown"
+      }
+
+      # Categorize the file
+      if ($file.Name -match "\.etl$") {
+        $fileInfo.Category = "ETL Log"
+        # Process ETL files if needed
+      }
+      elseif ($file.Name -match "\.log$|\.txt$") {
+        $fileInfo.Category = "Text Log"
+        
+        # Sample the first few lines to add context
+        try {
+          $sampleContent = Get-Content -Path $file.FullName -TotalCount 10 -ErrorAction Stop
+          $relevantEntries = $sampleContent | Where-Object { $_ -match "DeliveryOptimization|BITS|WindowsUpdate|error|warning|fail" }
+          
+          if ($relevantEntries) {
+            $fileInfo | Add-Member -MemberType NoteProperty -Name "SampleContent" -Value ($relevantEntries -join "`n")
+          }
+        }
+        catch {
+          Write-Log "Could not read content from $($file.Name): $_" "WARN"
+        }
+      }
+      elseif ($file.Name -match "\.xml$|\.json$") {
+        $fileInfo.Category = "Configuration"
+        # Process configuration files if needed
+      }
+      elseif ($file.Name -match "\.cab$|\.zip$") {
+        $fileInfo.Category = "Archive"
+        # Process nested archives if needed
+      }
+      
+      # Add to diagnostics buffer
+      $Buffers.DiagnosticsData.Add($fileInfo) | Out-Null
+    }
+
+    # Look for Windows Update ETL logs that can be converted
+    $wuEtlFiles = Get-ChildItem -Path $DiagnosticsPath -Recurse -File | Where-Object {
+      $_.Name -match "\.etl$" -and $_.FullName -match "\\WindowsUpdate\\"
+    }
+
+    if ($wuEtlFiles.Count -gt 0) {
+      Write-Log "Found $($wuEtlFiles.Count) Windows Update ETL logs" "INFO"
+      
+      # Create a temporary folder for converted logs
+      $tempWULogFolder = Join-Path -Path $env:TEMP -ChildPath "WULogs_$([Guid]::NewGuid().ToString())"
+      New-Item -Path $tempWULogFolder -ItemType Directory -Force | Out-Null
+      
+      # Try to convert the ETL files to text logs if Get-WindowsUpdateLog cmdlet is available
+      if (Get-Command -Name Get-WindowsUpdateLog -ErrorAction SilentlyContinue) {
+        $etlFolder = Split-Path -Path $wuEtlFiles[0].FullName -Parent
+        $outputLog = Join-Path -Path $tempWULogFolder -ChildPath "WindowsUpdate.log"
+        
+        try {
+          Get-WindowsUpdateLog -EtlPath $etlFolder -LogPath $outputLog -ErrorAction Stop
+          Write-Log "Successfully converted Windows Update ETL logs to $outputLog" "SUCCESS"
+          
+          # Process converted log
+          $wuLogEntries = Get-Content -Path $outputLog | Where-Object { 
+            $_ -match "DeliveryOptimization|DO_|BITS" 
+          }
+          
+          if ($wuLogEntries) {
+            Write-Log "Found $($wuLogEntries.Count) DO-related entries in Windows Update logs" "INFO"
+            
+            foreach ($entry in $wuLogEntries) {
+              $Buffers.DiagnosticsData.Add([PSCustomObject]@{
+                FileName = "WindowsUpdate.log"
+                Category = "Windows Update Log"
+                Content = $entry
+                Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+              }) | Out-Null
+            }
+          }
+        }
+        catch {
+          Write-Log "Failed to convert Windows Update ETL logs: $_" "WARN"
+        }
+      }
+      else {
+        Write-Log "Get-WindowsUpdateLog cmdlet not available - cannot convert ETL files" "WARN"
+      }
+    }
+
+    # Add summary of diagnostics data to Summary buffer
+    $Buffers.Summary.Add([PSCustomObject]@{
+      Test = "Diagnostics Data"
+      Result = "$($doFiles.Count) DO-related files found"
+      Status = if ($doFiles.Count -gt 0) { "PASS" } else { "WARN" }
+      Impact = if ($doFiles.Count -gt 0) { "Additional diagnostic information available" } else { "Limited diagnostic information" }
+    }) | Out-Null
+  }
+  catch {
+    Write-Log "Error processing diagnostics data: $_" "ERROR"
+  }
 }
 
 # ───── MAIN EXECUTION ─────
@@ -1020,6 +1182,27 @@ Write-Host "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬�
 
 if (-not (Test-Path $OutputPath)) {
   New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+}
+
+# Extract and process diagnostics data if provided
+if ($DiagnosticsZip -and (Test-Path -Path $DiagnosticsZip)) {
+  Write-Log "Diagnostics zip file provided: $DiagnosticsZip" "INFO"
+  
+  # Create a unique temporary folder for extraction
+  $extractPath = Join-Path -Path $env:TEMP -ChildPath "DODiagnostics_$([Guid]::NewGuid().ToString())"
+  
+  # Extract the zip file
+  $extractSuccess = Extract-DiagnosticsZip -ZipPath $DiagnosticsZip -ExtractPath $extractPath
+  
+  if ($extractSuccess) {
+    # Process the extracted data
+    Process-DiagnosticsData -DiagnosticsPath $extractPath
+  }
+}
+else {
+  if ($DiagnosticsZip) {
+    Write-Log "Specified DiagnosticsZip file not found: $DiagnosticsZip" "WARN"
+  }
 }
 
 # Run all diagnostics sequentially
@@ -1058,64 +1241,10 @@ if ($criticalIssues -gt 0) {
   Write-Host "👍 No issues detected. Delivery Optimization appears to be configured correctly" -ForegroundColor Green
 }
 
-Write-Host "`n📝 Report Details:" -ForegroundColor Cyan
-Write-Host "   - Full analysis: $reportPath" -ForegroundColor White
-Write-Host "   - CSV exports: $csvFolder" -ForegroundColor White
-Write-Host "   - Total checks performed: $(($Buffers.Summary).Count)" -ForegroundColor White
-Write-Host "   - Recommendations provided: $(($Buffers.Recommendations).Count)" -ForegroundColor White
+Write-Host "`n📊 Report saved to: $reportPath" -ForegroundColor Cyan
 
 if ($Show) {
   Write-Host "`n🔍 Opening Excel report..." -ForegroundColor Cyan
-}
-
-Write-Host "`n📋 Interpreting Results:" -ForegroundColor Cyan
-Write-Host "   - Summary tab provides an overview with health status and key metrics" -ForegroundColor White
-Write-Host "   - Test Results tab shows all individual test outcomes" -ForegroundColor White
-Write-Host "   - Recommendations tab lists actionable steps in priority order" -ForegroundColor White
-Write-Host "   - Health Check tab contains detailed service diagnostics" -ForegroundColor White
-Write-Host "   - Color coding indicates severity (Red=Critical, Yellow=Warning, Green=Good)" -ForegroundColor White
-
-Write-Host "`n🔗 Additional Resources:" -ForegroundColor Cyan
-Write-Host "   - Delivery Optimization Documentation: https://learn.microsoft.com/en-us/windows/deployment/optimization/delivery-optimization" -ForegroundColor White
-Write-Host "   - Group Policy Settings: https://learn.microsoft.com/en-us/windows/deployment/optimization/delivery-optimization-reference" -ForegroundColor White
-Write-Host "   - Troubleshooting: https://learn.microsoft.com/en-us/windows/deployment/optimization/waas-delivery-optimization-setup" -ForegroundColor White
-
-# Add a simple text log file containing the key findings for text-only environments
-try {
-    $textSummaryPath = Join-Path -Path $OutputPath -ChildPath "DO_Report_Summary_$timestamp.txt"
-    $textContent = @"
-========================================================
-DELIVERY OPTIMIZATION TROUBLESHOOTER SUMMARY
-========================================================
-System: $env:COMPUTERNAME
-Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-Duration: $minutes min $seconds sec
-
---------------------------------------------------------
-OVERALL HEALTH STATUS:
---------------------------------------------------------
-$(if ($criticalIssues -gt 0) {"CRITICAL - $criticalIssues critical issues detected"} elseif ($warnings -gt 0) {"WARNING - $warnings warnings detected"} else {"HEALTHY - All checks passed"})
-
---------------------------------------------------------
-KEY FINDINGS:
---------------------------------------------------------
-$(foreach ($item in $Buffers.Summary) {"• $($item.Test): $($item.Result) - $($item.Status)"})
-
---------------------------------------------------------
-TOP RECOMMENDATIONS:
---------------------------------------------------------
-$(foreach ($rec in ($Buffers.Recommendations | Sort-Object -Property @{Expression="Severity"; Descending=$true} | Select-Object -First 5)) {"• $($rec.Severity): $($rec.Recommendation)"})
-
---------------------------------------------------------
-Full report available at:
-$reportPath
---------------------------------------------------------
-"@
-
-    $textContent | Out-File -FilePath $textSummaryPath -Encoding UTF8
-    Write-Host "`n📄 Text summary created: $textSummaryPath" -ForegroundColor White
-} catch {
-    Write-Log "Failed to create text summary: $_" "WARN"
 }
 
 Write-Host "`n🟦 Delivery Optimization Troubleshooter Script Complete 🟦" -ForegroundColor Cyan

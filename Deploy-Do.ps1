@@ -1,7 +1,9 @@
+<# Example: .\Deploy-Do.ps1 -Show -OutputPath "C:\Path\To\Output" -DiagnosticsZip "C:\Path\To\DiagnosticsFile.zip"#>
 [CmdletBinding()]
 param (
     [switch]$Show,
-    [string]$OutputPath = "$env:USERPROFILE\DOReports"
+    [string]$OutputPath = "$env:USERPROFILE\DOReports",
+    [string]$DiagnosticsZip
 )
 Add-Type -AssemblyName System.Windows.Forms
 if ($Show) {
@@ -25,23 +27,23 @@ function Expand-EmbeddedResourcesParallel {
     # Use ForEach-Object -Parallel with a throttle limit to limit concurrency
     $results = $resources | ForEach-Object -Parallel {
         # Using $using:ExtractDir to reference the variable from the parent scope
-            try {
+        try {
             $targetPath = Join-Path $using:ExtractDir $_
-                $targetDir = Split-Path $targetPath
-                if (-not (Test-Path $targetDir)) {
-                    New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
-                }
+            $targetDir = Split-Path $targetPath
+            if (-not (Test-Path $targetDir)) {
+                New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
+            }
             $bytes = [Embedded]::Get($_)
-                [System.IO.File]::WriteAllBytes($targetPath, $bytes)
+            [System.IO.File]::WriteAllBytes($targetPath, $bytes)
             return "Extracted: $_"
-            }
-            catch {
+        }
+        catch {
             return "FAILED: $_ - $($_.Exception.Message)"
-            }
+        }
     } -ThrottleLimit 4   # Adjust throttle limit as appropriate
     # Log each extraction result
     $results | ForEach-Object { Write-Log $_ }
-    }
+}
 function Test-IsAdministrator {
     $identity  = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
@@ -73,7 +75,7 @@ function Invoke-Elevation {
     if (-not (Test-IsAdministrator)) {
         Write-Log "Elevating script as administrator..."
         $pwshExe = Get-PwshExecutable
-        Start-Process -FilePath $pwshExe -ArgumentList "-ExecutionPolicy Bypass -NoProfile -File `"$($MyInvocation.MyCommand.Definition)`" -Show:$Show -OutputPath:`"$OutputPath`"" -Verb RunAs
+        Start-Process -FilePath $pwshExe -ArgumentList "-ExecutionPolicy Bypass -NoProfile -File `"$($MyInvocation.MyCommand.Definition)`" -Show:$Show -OutputPath:`"$OutputPath`" -DiagnosticsZip:`"$DiagnosticsZip`"" -Verb RunAs
         exit
     }
 }
@@ -82,6 +84,9 @@ function Invoke-Troubleshooter {
         $scriptPath = Join-Path $ExtractDir "Invoke-DoTroubleshooter.ps1"
         $psExec     = Join-Path $ExtractDir "PSTools\PsExec64.exe"
         $cmdArgs    = "& '$scriptPath' -OutputPath '$OutputPath' -Show:$Show"
+        if ($DiagnosticsZip) {
+            $cmdArgs += " -DiagnosticsZip '$DiagnosticsZip'"
+        }
         if (Test-Path $psExec) {
             Write-Log "Running troubleshooter via PsExec..."
             & $psExec -accepteula -s -i "$PwshPath" -ExecutionPolicy Bypass -NoProfile -Command $cmdArgs
