@@ -690,17 +690,17 @@ function Test-MCCCheck {
 function Invoke-DOLogAnalysis {
     Write-Log "Running DO log analysis..." "INFO"
     Show-Progress -Activity "Analyzing DO logs" -PercentComplete 80
-    
+
     try {
         # Process results
         $results = Get-DeliveryOptimizationLogAnalysis -ListConnections
-        
+
         # Categorize and process results
         $categorizedResults = @()
         foreach ($result in $results) {
             # Extract basic stats
             $successCategory = "Unknown"
-            
+
             if ($result.Result -eq "Success") {
                 # Check if IP is in private range
                 if ($result.Url -match "http.*://(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})") {
@@ -719,7 +719,7 @@ function Invoke-DOLogAnalysis {
                     }
                 }
             }
-            
+
             $categorizedResults += [PSCustomObject]@{
                 Timestamp = $result.TimeStamp
                 Url = $result.Url
@@ -731,20 +731,20 @@ function Invoke-DOLogAnalysis {
                 ErrorCategory = if ($result.Result -ne "Success") { "Connection Failed" } else { "N/A" }
             }
         }
-        
+
         # Calculate statistics
         $total = $results.Count
         $success = ($results | Where-Object { $_.Result -eq "Success" }).Count
         $failed = $total - $success
         $successRate = if ($total -gt 0) { [math]::Round(($success / $total) * 100, 0) } else { 0 }
-        
+
         Write-Log "Log analysis complete: $success successful ($successRate%), $failed failed connections" (if($successRate -gt 75) {"SUCCESS"} elseif($successRate -gt 25) {"INFO"} else {"WARN"})
-        
+
         # Additional statistics
         $localPeers = ($categorizedResults | Where-Object { $_.SuccessCategory -eq "Local Peer" }).Count
         $internetPeers = ($categorizedResults | Where-Object { $_.SuccessCategory -eq "Internet Peer" }).Count
         $totalBytes = ($categorizedResults | Measure-Object -Property Bytes -Sum).Sum
-        
+
         # Add summary information
         $Buffers.Summary.Add([PSCustomObject]@{
             Test = "DO Connection Success Rate"
@@ -752,20 +752,20 @@ function Invoke-DOLogAnalysis {
             Status = if ($successRate -gt 75) { "PASS" } elseif ($successRate -gt 25) { "WARN" } else { "FAIL" }
             Impact = if ($successRate -gt 75) { "Effective peer sharing" } elseif ($successRate -gt 25) { "Partial peer sharing benefits" } else { "Limited peer sharing benefits" }
         }) | Out-Null
-        
+
         $Buffers.Summary.Add([PSCustomObject]@{
             Test = "Peer Source Distribution"
             Result = "Local: $localPeers, Internet: $internetPeers"
             Status = "INFO"
             Impact = "Data on peer source distribution"
         }) | Out-Null
-        
+
         if ($successRate -lt 25) {
             Add-Recommendation -Area "Network" -Recommendation "Low peer connection success rate ($successRate%). Check network connectivity and firewall rules." -Severity "Important"
         }
-        
+
         $categorizedResults | ForEach-Object { $Buffers.SysInfo.Add($_) | Out-Null }
-        
+
         return $results
     } catch {
         Write-Log "Log analysis failed: $_" "ERROR"
@@ -775,7 +775,7 @@ function Invoke-DOLogAnalysis {
             Status = "ERROR"
             Impact = "Unable to determine peer connection effectiveness"
         }) | Out-Null
-        
+
         Add-Recommendation -Area "Diagnostics" -Recommendation "Run the analysis with administrative privileges to access DO logs." -Severity "Informational"
     }
 }
@@ -869,10 +869,10 @@ function Invoke-DOTroubleshooter {
         if (Test-Path $logPath) {
             $log = Get-Content -Path $logPath -Raw
             # Parse log for key information
-            $matches = [regex]::Matches($log, "(?:PASS|FAIL|WARNING):\s+(.*?)(?=\r?\nP|\r?\nF|\r?\nW|\r?\n\r?\n|\z)")
+            $logMatches = [regex]::Matches($log, "(?:PASS|FAIL|WARNING):\s+(.*?)(?=\r?\nP|\r?\nF|\r?\nW|\r?\n\r?\n|\z)")
             
             $results = @()
-            foreach ($match in $matches) {
+            foreach ($match in $logMatches) {
                 $result = $match.Value
                 $status = if ($result -match "^PASS") { "PASS" } elseif ($result -match "^FAIL") { "FAIL" } else { "WARN" }
                 $message = $result -replace "^(?:PASS|FAIL|WARNING):\s+", ""
@@ -923,7 +923,6 @@ function Invoke-DOTroubleshooter {
         }) | Out-Null
     }
 }
-
 function New-ExecutiveSummary {
     Write-Log "Generating executive summary..." "INFO"
     
