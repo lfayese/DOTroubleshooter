@@ -130,6 +130,6 @@
       Enabled       = $true                          # Enable bundling.
       Modules       = $true                          # Bundle modules referenced by the script.
       NestedModules = $true                          # Include nested modules, if present.
-    IgnoredModules = [string[]]@()                          # Modules to exclude from bundling.
+    IgnoredModules = [string[]]@('.git', '.gitignore')      # Modules to exclude from bundling.
   }
 }
