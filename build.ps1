@@ -1,21 +1,16 @@
-<#
+<# 
 .SYNOPSIS
     Package a PowerShell script into a signed executable using PowerShell Pro Tools.
+
 .DESCRIPTION
-    This build script handles the packaging and code signing of PowerShell scripts into standalone executables.
-    It securely manages certificate passwords and provides detailed logging of the build process.
-
-    .\build.ps1
-.\build.ps1 -SkipSigning
-
-$securePassword = ConvertTo-SecureString "test123" -AsPlainText -Force
-.\build.ps1 -CertPath ".\CodeSigning\CodeSigningCert.pfx" -CertPassword $securePassword
-
+    This build script handles packaging and code signing of PowerShell scripts into standalone executables.
+    It leverages $PSScriptRoot to resolve relative paths and ensures certificate paths are absolute before import.
+    The script also logs detailed progress and handles cleanup tasks.
 
 .NOTES
     Version: 2.0
     Author: Claude
-    Requires: PowerShell 5.1 or higher, PowerShell Pro Tools
+    Requires: PowerShell 5.1+ and PowerShell Pro Tools
 #>
 
 [CmdletBinding()]
@@ -38,15 +33,13 @@ param(
 
 # Script Variables
 $script:ErrorActionPreference = 'Stop'
-# Use automatic $VerbosePreference from CmdletBinding
-
-# Build Configuration
 $BuildConfig = @{
-    MinimumPSVersion = '5.1'
-    RequiredModules = @('PowerShellProTools')
-    TempPath = Join-Path $env:TEMP "PSBuild_$(Get-Date -Format 'yyyyMMddHHmmss')"
-    LogPath = Join-Path $PSScriptRoot 'build.log'
-    DefaultCertPath = Join-Path $PSScriptRoot "CodeSigning\CodeSigningCert.pfx"
+    MinimumPSVersion  = '5.1'
+    RequiredModules   = @('PowerShellProTools')
+    # Using $PSScriptRoot ensures relative paths resolve correctly
+    TempPath          = Join-Path $PSScriptRoot "TempBuild_$(Get-Date -Format 'yyyyMMddHHmmss')"
+    LogPath           = Join-Path $PSScriptRoot 'build.log'
+    DefaultCertPath   = Join-Path $PSScriptRoot "CodeSigning\CodeSigningCert.pfx"
 }
 
 # Helper Functions
@@ -59,37 +52,38 @@ function Write-BuildLog {
     
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $logMessage = "[$timestamp] [$Level] $Message"
-    
-    # Console output with colors
     $colors = @{
-        Info = 'Cyan'
+        Info    = 'Cyan'
         Warning = 'Yellow'
-        Error = 'Red'
+        Error   = 'Red'
         Success = 'Green'
     }
-    
     Write-Host $logMessage -ForegroundColor $colors[$Level]
-    
-    # Append to log file
     $logMessage | Add-Content -Path $BuildConfig.LogPath -Encoding UTF8
 }
 
 function Test-BuildPrerequisites {
     Write-BuildLog "Checking build prerequisites..." -Level Info
     
-    # Check PowerShell version
     if ($PSVersionTable.PSVersion -lt [Version]$BuildConfig.MinimumPSVersion) {
         throw "PowerShell version $($BuildConfig.MinimumPSVersion) or higher is required"
     }
     
-    # Verify required modules
+    # Import the PowerShell Pro Tools module from the specified path.
+    try {
+        Import-Module 'c:\Users\sysTekAdmin\.vscode\extensions\ironmansoftware.powershellprotools-2024.12.0\Modules\PowerShellProTools.VSCode\PowerShellProTools.VSCode.psd1' -ErrorAction Stop
+        Write-BuildLog "Successfully imported PowerShell Pro Tools module" -Level Success
+    }
+    catch {
+        throw "Failed to import PowerShell Pro Tools module: $_"
+    }
+    
     foreach ($module in $BuildConfig.RequiredModules) {
         if (-not (Get-Module -ListAvailable -Name $module)) {
             throw "Required module '$module' is not installed"
         }
     }
     
-    # Create temp directory if needed
     if (-not (Test-Path $BuildConfig.TempPath)) {
         New-Item -Path $BuildConfig.TempPath -ItemType Directory -Force | Out-Null
     }
@@ -112,12 +106,11 @@ function Import-PackageConfig {
         # Validate required configuration keys
         $requiredKeys = @('Root', 'OutputPath')
         $missingKeys = $requiredKeys.Where({ -not $config.ContainsKey($_) })
-        
         if ($missingKeys) {
             throw "Missing required configuration keys: $($missingKeys -join ', ')"
         }
         
-        # Expand any relative paths
+        # Expand relative paths using $PSScriptRoot
         $config.Root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $config.Root))
         $config.OutputPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $config.OutputPath))
         
@@ -143,17 +136,14 @@ function Get-SecureCertificatePassword {
         return $ProvidedPassword
     }
     
-    # Check for password in environment variable (CI/CD scenario)
     $envPassword = $env:CODE_SIGNING_PASSWORD
     if ($envPassword) {
         Write-BuildLog "Using certificate password from environment variable" -Level Info
         return ConvertTo-SecureString -String $envPassword -AsPlainText -Force
     }
     
-    # Prompt for password interactively
     Write-BuildLog "Prompting for certificate password..." -Level Info
     $securePassword = Read-Host -AsSecureString -Prompt "Enter certificate password"
-    
     return $securePassword
 }
 
@@ -164,17 +154,14 @@ function Update-ConfigWithSigningInfo {
         [securestring]$CertificatePassword
     )
     
-    # Ensure the Signing section exists
     if (-not $Config.ContainsKey('Signing')) {
         $Config.Signing = @{}
     }
     
-    # Update certificate path
     if ($CertificatePath) {
         $Config.Signing.CertificatePath = $CertificatePath
     }
     
-    # Convert secure string to plain text for the config
     if ($CertificatePassword) {
         $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($CertificatePassword)
         try {
@@ -186,14 +173,11 @@ function Update-ConfigWithSigningInfo {
         }
     }
     
-    # Ensure timestamp server is set
     if (-not $Config.Signing.TimeStampServer) {
         $Config.Signing.TimeStampServer = "http://timestamp.digicert.com"
     }
     
-    # Enable signing
     $Config.Signing.Enabled = $true
-    
     return $Config
 }
 
@@ -210,17 +194,15 @@ function Test-Certificate {
     }
     
     try {
-        # Try to load the certificate to verify it's valid
         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
-        $cert.Import($CertificatePath, $Password, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
+        $storageFlags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+        $cert.Import($CertificatePath, $Password, $storageFlags)
         
-        # Verify it's a code signing certificate
         $hasCodeSigningEKU = $cert.EnhancedKeyUsageList | Where-Object { $_.ObjectId -eq "1.3.6.1.5.5.7.3.3" }
         if (-not $hasCodeSigningEKU) {
             Write-BuildLog "WARNING: Certificate does not appear to be a code signing certificate" -Level Warning
         }
         
-        # Check expiration
         $now = Get-Date
         if ($cert.NotBefore -gt $now) {
             Write-BuildLog "WARNING: Certificate is not yet valid (valid from $($cert.NotBefore))" -Level Warning
@@ -247,23 +229,19 @@ function New-BuildArtifact {
     Write-BuildLog "Starting build process..." -Level Info
     
     try {
-        # Ensure output directory exists
         if (-not (Test-Path $Config.OutputPath)) {
             New-Item -Path $Config.OutputPath -ItemType Directory -Force | Out-Null
             Write-BuildLog "Created output directory: $($Config.OutputPath)" -Level Info
         }
         
-        # Determine output executable name
         $exeName = if ($Config.Package.OutputName) {
             "$($Config.Package.OutputName).exe"
         }
         else {
             [System.IO.Path]::ChangeExtension((Split-Path -Leaf $Config.Root), ".exe")
         }
-        
         $exePath = Join-Path $Config.OutputPath $exeName
         
-        # Remove existing build if present
         if (Test-Path $exePath) {
             if (-not $Force) {
                 $choice = Read-Host "Existing build found at $exePath. Overwrite? (Y/N)"
@@ -275,7 +253,6 @@ function New-BuildArtifact {
             Write-BuildLog "Removed existing build" -Level Info
         }
         
-        # Perform the build
         $buildStart = Get-Date
         
         if (Get-Command -Name 'Merge-Script' -ErrorAction SilentlyContinue) {
@@ -284,21 +261,17 @@ function New-BuildArtifact {
         }
         else {
             Write-BuildLog "PowerShell Pro Tools not found, attempting alternative build method..." -Level Warning
-            # Implement alternative build method here if needed
             throw "No suitable build method available"
         }
         
-        # Verify build
         if (Test-Path $exePath) {
             $buildDuration = (Get-Date) - $buildStart
             $fileSize = (Get-Item $exePath).Length / 1MB
-            
             Write-BuildLog "Build completed successfully:" -Level Success
             Write-BuildLog "- Location: $exePath" -Level Success
             Write-BuildLog "- Duration: $($buildDuration.TotalSeconds.ToString('0.00')) seconds" -Level Success
             Write-BuildLog "- Size: $($fileSize.ToString('0.00')) MB" -Level Success
             
-            # Verify signature if signing was enabled
             if ($Config.Signing.Enabled) {
                 $signature = Get-AuthenticodeSignature -FilePath $exePath
                 if ($signature.Status -eq 'Valid') {
@@ -308,7 +281,6 @@ function New-BuildArtifact {
                     Write-BuildLog "- Signature: $($signature.Status) - Signing may have failed" -Level Warning
                 }
             }
-            
             return $exePath
         }
         else {
@@ -324,11 +296,9 @@ function New-BuildArtifact {
 function Remove-BuildArtifacts {
     if (-not $NoCleanup) {
         Write-BuildLog "Cleaning up build artifacts..." -Level Info
-        
         if (Test-Path $BuildConfig.TempPath) {
             Remove-Item -Path $BuildConfig.TempPath -Recurse -Force
         }
-        
         Write-BuildLog "Cleanup completed" -Level Success
     }
 }
@@ -336,16 +306,11 @@ function Remove-BuildArtifacts {
 # Main Execution
 try {
     Write-BuildLog "Build process started" -Level Info
-    
-    # Initialize build environment
     Test-BuildPrerequisites
-    
-    # Import and validate configuration
     $packageConfig = Import-PackageConfig -ConfigPath (Join-Path $PSScriptRoot "Package.psd1")
     
     # Handle code signing
     if (-not $SkipSigning) {
-        # Determine certificate path
         $certificatePath = if ($CertPath) { 
             $CertPath 
         } elseif (Test-Path $BuildConfig.DefaultCertPath) { 
@@ -362,35 +327,35 @@ try {
             }
         }
         
+        # Convert certificate path to absolute if it's relative
+        if ($certificatePath -and -not (Split-Path -Path $certificatePath -IsAbsolute)) {
+            $certificatePath = Join-Path -Path $PSScriptRoot -ChildPath $certificatePath
+        }
+        
         if (-not $SkipSigning -and $certificatePath) {
-            # Get certificate password
             $certPassword = Get-SecureCertificatePassword -ProvidedPassword $CertPassword
-            
-            # Test the certificate
             $certValid = Test-Certificate -CertificatePath $certificatePath -Password $certPassword
             
             if ($certValid) {
-                # Update config with signing information
                 $packageConfig = Update-ConfigWithSigningInfo -Config $packageConfig -CertificatePath $certificatePath -CertificatePassword $certPassword
                 Write-BuildLog "Code signing enabled with certificate: $certificatePath" -Level Success
             } else {
                 Write-BuildLog "Certificate validation failed, proceeding without signing" -Level Warning
                 $packageConfig.Signing.Enabled = $false
             }
-        } else {
+        }
+        else {
             $packageConfig.Signing.Enabled = $false
         }
-    } else {
+    }
+    else {
         $packageConfig.Signing.Enabled = $false
         Write-BuildLog "Code signing skipped as requested" -Level Info
     }
     
-    # Create build artifact
     $builtExecutable = New-BuildArtifact -Config $packageConfig
-    
     Write-BuildLog "Build process completed successfully" -Level Success
     
-    # Show final status
     if ($packageConfig.Signing.Enabled) {
         Write-Host "`n✅ Signed executable created at: $builtExecutable" -ForegroundColor Green
     } else {
@@ -403,10 +368,8 @@ catch {
     exit 1
 }
 finally {
-    # Clean up sensitive information
     if ($packageConfig -and $packageConfig.Signing -and $packageConfig.Signing.CertificatePassword) {
         $packageConfig.Signing.CertificatePassword = $null
     }
-    
     Remove-BuildArtifacts
 }

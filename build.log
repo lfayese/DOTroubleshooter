@@ -370,3 +370,34 @@
 }.
 [2025-03-26 17:12:14] [Info] Cleaning up build artifacts...
 [2025-03-26 17:12:14] [Success] Cleanup completed
+[2025-03-26 17:27:58] [Info] Build process started
+[2025-03-26 17:27:58] [Info] Checking build prerequisites...
+[2025-03-26 17:27:58] [Success] Prerequisites check completed
+[2025-03-26 17:27:58] [Info] Importing package configuration from D:\do\DOTroubleshooterWin32\Package.psd1
+[2025-03-26 17:27:59] [Info] Generated JSON configuration at D:\do\DOTroubleshooterWin32\Package.psd1.json
+[2025-03-26 17:27:59] [Info] Using provided certificate password
+[2025-03-26 17:27:59] [Info] Testing certificate at .\CodeSigning\CodeSigningCert.pfx
+[2025-03-26 17:27:59] [Error] Certificate test failed: Exception calling "Import" with "3" argument(s): "X509Certificate is immutable on this platform. Use the equivalent constructor instead."
+[2025-03-26 17:27:59] [Warning] Certificate validation failed, proceeding without signing
+[2025-03-26 17:27:59] [Info] Starting build process...
+[2025-03-26 17:27:59] [Info] Building with PowerShell Pro Tools...
+[2025-03-26 17:27:59] [Error] Build failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:27:59] [Error] Build process failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:27:59] [Info] Cleaning up build artifacts...
+[2025-03-26 17:27:59] [Success] Cleanup completed
+[2025-03-26 17:28:19] [Info] Build process started
+[2025-03-26 17:28:19] [Info] Checking build prerequisites...
+[2025-03-26 17:28:20] [Success] Prerequisites check completed
+[2025-03-26 17:28:20] [Info] Importing package configuration from D:\do\DOTroubleshooterWin32\Package.psd1
+[2025-03-26 17:28:20] [Info] Generated JSON configuration at D:\do\DOTroubleshooterWin32\Package.psd1.json
+[2025-03-26 17:28:20] [Info] Using provided certificate password
+[2025-03-26 17:28:20] [Info] Testing certificate at .\CodeSigning\CodeSigningCert.pfx
+[2025-03-26 17:28:20] [Error] Certificate test failed: Exception calling "Import" with "3" argument(s): "The system cannot find the path specified.
+"
+[2025-03-26 17:28:20] [Warning] Certificate validation failed, proceeding without signing
+[2025-03-26 17:28:20] [Info] Starting build process...
+[2025-03-26 17:28:20] [Info] Building with PowerShell Pro Tools...
+[2025-03-26 17:28:20] [Error] Build failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:28:20] [Error] Build process failed: Failed to read 'Resources'. Expected 'System.String[]' but was 'System.Object[]'.
+[2025-03-26 17:28:20] [Info] Cleaning up build artifacts...
+[2025-03-26 17:28:20] [Success] Cleanup completed
