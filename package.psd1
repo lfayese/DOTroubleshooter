@@ -1,30 +1,30 @@
 @{
     # The main entry point of your package - the root script to package
-    Root = ".\Deploy-Do.ps1"
+    Root       = ".\Deploy-Do.ps1"
     OutputPath = ".\out"
     
     Package = @{
         Enabled             = $true
-        DotNetVersion       = 'net8.0'
-        PowerShellVersion   = '7.4.0'
-        PackageType         = 'Console'
+        DotNetVersion       = "net8.0"
+        PowerShellVersion   = "7.4.0"
+        PackageType         = "Console"
         HideConsoleWindow   = $false
         RequireElevation    = $true
-        ProductVersion      = '1.0.0'
-        FileVersion         = '1.0.0.0'
-        FileDescription     = 'Delivery Optimization Troubleshooter'
-        ProductName         = 'DO Troubleshooter'
-        Copyright           = '© 2025 BAH_ETSS'
-        CompanyName         = 'BAH_ETSS_WinOps'
-        Platform           = 'x64'
-        RuntimeIdentifier  = 'win-x64'
-        Host               = 'Default'
-        HighDPISupport     = $true
-        Lightweight        = $true
-        DisableQuickEdit   = $true
-        Icon               = '.\Resources\app-icon.ico'
+        ProductVersion      = "1.0.0"
+        FileVersion         = "1.0.0.0"
+        FileDescription     = "Delivery Optimization Troubleshooter"
+        ProductName         = "DO Troubleshooter"
+        Copyright           = "© 2025 BAH_ETSS"
+        CompanyName         = "BAH_ETSS_WinOps"
+        Platform            = "x64"
+        RuntimeIdentifier   = "win-x64"
+        Host                = "Default"
+        HighDPISupport      = $true
+        Lightweight         = $true
+        DisableQuickEdit    = $true
+        Icon                = ".\Resources\app-icon.ico"
         
-        Resources = [string[]]@(
+        Resources = @(
             ".\Deploy-Do.ps1",
             ".\Invoke-DoTroubleshooter.ps1",
             ".\PowerShell-7.5.0-win-x64.zip",
@@ -127,33 +127,33 @@
             ".\Scripts\DeliveryOptimizationTroubleshooter_InstalledScriptInfo.xml",
             ".\Scripts\DeliveryOptimizationTroubleshooter.ps1"
         )
-        OutputName = 'DoTroubleshooter'
+        OutputName = "DoTroubleshooter"
     }
 
     Bundle = @{
-        Enabled = $true
-        Modules = $true
-        NestedModules = $true
-        IgnoredModules = [string[]]@(
-            '.git',
-            '.gitignore',
-            'PowerShellGet',
-            'PackageManagement'
+        Enabled        = $true
+        Modules        = $true
+        NestedModules  = $true
+        IgnoredModules = @(
+            ".git",
+            ".gitignore",
+            "PowerShellGet",
+            "PackageManagement"
         )
     }
 
     Advanced = @{
-        TrimWhitespace = $true
-        ObfuscateScript = $false
+        TrimWhitespace          = $true
+        ObfuscateScript         = $false
         DecompilationProtection = $false
-        DetectAzureModules = $true
-        CompressionLevel = 'Optimal'
-        ErrorActionPreference = 'Stop'
-        ProgressPreference = 'SilentlyContinue'
+        DetectAzureModules      = $true
+        CompressionLevel        = "Optimal"
+        ErrorActionPreference   = "Stop"
+        ProgressPreference      = "SilentlyContinue"
     }
 
     Signing = @{
-        Enabled = $true
+        Enabled         = $true
         CertificatePath = ".\CodeSigning\CodeSigningCert.pfx"
         TimeStampServer = "http://timestamp.digicert.com"
     }
