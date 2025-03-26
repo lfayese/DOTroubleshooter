@@ -27,9 +27,6 @@ param(
     [switch]$NoCleanup,
     
     [Parameter()]
-    [switch]$Verbose,
-    
-    [Parameter()]
     [switch]$SkipSigning,
     
     [Parameter()]
@@ -41,7 +38,7 @@ param(
 
 # Script Variables
 $script:ErrorActionPreference = 'Stop'
-$script:VerbosePreference = if ($Verbose) { 'Continue' } else { 'SilentlyContinue' }
+# Use automatic $VerbosePreference from CmdletBinding
 
 # Build Configuration
 $BuildConfig = @{
