@@ -2,7 +2,7 @@
   # The main entry point of your package - the root script to package.
   Root       = "d:\do\DOTroubleshooterWin32"
   # The output directory where the packaged executable will be created.
-  OutputPath = "d:\do\DOTroubleshooterWin32\out"
+  OutputPath = "d:\do\out"
   # Package options determine how the executable is built.
   Package = @{
       Enabled             = $true                      # Enable packaging into an executable.
