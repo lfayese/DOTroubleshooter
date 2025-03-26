@@ -1020,7 +1020,7 @@ function Export-DOExcelReport {
 }
 
 # ───── EXTRACT DIAGNOSTICS ZIP ─────
-function Extract-DiagnosticsZip {
+function Expand-DiagnosticsZip {
   param (
     [string]$ZipPath,
     [string]$ExtractPath
@@ -1046,7 +1046,7 @@ function Extract-DiagnosticsZip {
 }
 
 # ───── PROCESS DIAGNOSTICS DATA ─────
-function Process-DiagnosticsData {
+function Invoke-DiagnosticsDataProcessing {
   param (
     [string]$DiagnosticsPath
   )
@@ -1192,11 +1192,11 @@ if ($DiagnosticsZip -and (Test-Path -Path $DiagnosticsZip)) {
   $extractPath = Join-Path -Path $env:TEMP -ChildPath "DODiagnostics_$([Guid]::NewGuid().ToString())"
   
   # Extract the zip file
-  $extractSuccess = Extract-DiagnosticsZip -ZipPath $DiagnosticsZip -ExtractPath $extractPath
+  $extractSuccess = Expand-DiagnosticsZip -ZipPath $DiagnosticsZip -ExtractPath $extractPath
   
   if ($extractSuccess) {
     # Process the extracted data
-    Process-DiagnosticsData -DiagnosticsPath $extractPath
+    Invoke-DiagnosticsDataProcessing -DiagnosticsPath $extractPath
   }
 }
 else {
