@@ -5,6 +5,7 @@
   - Parses Intune diagnostic ZIPs or live system 
   - Converts ETL to WindowsUpdate.log and extracts DO entries 
   - Checks peer ports (7680/3544), DO service health, registry 
+  - Runs the official Microsoft DeliveryOptimizationTroubleshooter
   - Builds full Excel report with recommendations and health status 
 .PARAMETER DiagnosticsZip 
   Optional ZIP file to extract and analyze 
@@ -43,12 +44,13 @@ if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
 }
 # === Buffers ===
 $Buffers = @{
-    Summary         = [System.Collections.ArrayList]::new()
-    Recommendations = [System.Collections.ArrayList]::new()
-    DOLogErrors     = [System.Collections.ArrayList]::new()
-    DOHealth        = [System.Collections.ArrayList]::new()
-    PeerTests       = [System.Collections.ArrayList]::new()
-    WindowsUpdate   = [System.Collections.ArrayList]::new()
+    Summary                 = [System.Collections.ArrayList]::new()
+    Recommendations         = [System.Collections.ArrayList]::new()
+    DOLogErrors             = [System.Collections.ArrayList]::new()
+    DOHealth                = [System.Collections.ArrayList]::new()
+    PeerTests               = [System.Collections.ArrayList]::new()
+    WindowsUpdate           = [System.Collections.ArrayList]::new()
+    OfficialTroubleshooter  = [System.Collections.ArrayList]::new()
 }
 # === Logging ===
 function Write-Log {
@@ -109,58 +111,108 @@ function Expand-Zip {
 }
 function Convert-WindowsUpdateLog {
     param ($BaseFolder)
+    
     if (-not $BaseFolder -or -not (Test-Path $BaseFolder)) {
         Write-Log "Invalid folder path for ETL extraction." "ERROR"
         return $null
     }
-    # Use a filter to narrow down folders (assumes the folder name starts with 'windir_Logs_WindowsUpdate_etl')
-    $etlFolder = Get-ChildItem -Path $BaseFolder -Directory -Recurse -Filter "windir_Logs_WindowsUpdate_etl*" | Select-Object -First 1
-    if ($etlFolder) {
+    
+    # Search for all .etl files using a filter before recursing
+    $etlFiles = Get-ChildItem -Path $BaseFolder -Recurse -Filter "*.etl" -File -ErrorAction SilentlyContinue
+    
+    if ($etlFiles -and $etlFiles.Count -gt 0) {
+        Write-Log "Found $($etlFiles.Count) ETL file(s) in the extracted ZIP." "INFO"
+        
+        # Concatenate all ETL file paths separated by commas
+        $etlPaths = $etlFiles.FullName -join ','
         $outLog = Join-Path $env:TEMP "WU_Converted.log"
+        
         try {
-            Get-WindowsUpdateLog -ETLPath $etlFolder.FullName -LogPath $outLog -ErrorAction Stop
+            Write-Log "Converting ETL files to WindowsUpdate.log..." "INFO"
+            Get-WindowsUpdateLog -ETLPath $etlPaths -LogPath $outLog -ErrorAction Stop
             Write-Log "Converted WindowsUpdate ETL logs." "SUCCESS"
             return $outLog
-        } catch {
+        }
+        catch {
             Write-Log "Failed to convert WindowsUpdate logs: $_" "ERROR"
+            
+            # Fallback to older method if multiple files failed
+            $etlFolder = Get-ChildItem -Path $BaseFolder -Directory -Recurse -Filter "windir_Logs_WindowsUpdate_etl*" | Select-Object -First 1
+            if ($etlFolder) {
+                try {
+                    Write-Log "Trying alternate method with folder path..." "INFO"
+                    Get-WindowsUpdateLog -ETLPath $etlFolder.FullName -LogPath $outLog -ErrorAction Stop
+                    Write-Log "Converted WindowsUpdate ETL logs using folder path." "SUCCESS"
+                    return $outLog
+                }
+                catch {
+                    Write-Log "All conversion attempts failed: $_" "ERROR"
+                    return $null
+                }
+            }
+            else {
+                return $null
+            }
+        }
+    }
+    else {
+        # Fallback to folder-based search if no .etl files are found
+        $etlFolder = Get-ChildItem -Path $BaseFolder -Directory -Recurse -Filter "windir_Logs_WindowsUpdate_etl*" | Select-Object -First 1
+        if ($etlFolder) {
+            $outLog = Join-Path $env:TEMP "WU_Converted.log"
+            try {
+                Get-WindowsUpdateLog -ETLPath $etlFolder.FullName -LogPath $outLog -ErrorAction Stop
+                Write-Log "Converted WindowsUpdate ETL logs using folder path." "SUCCESS"
+                return $outLog
+            }
+            catch {
+                Write-Log "Failed to convert WindowsUpdate logs: $_" "ERROR"
+                return $null
+            }
+        }
+        else {
+            Write-Log "No ETL files found in ZIP." "WARN"
             return $null
         }
-    } else {
-        Write-Log "ETL folder not found in ZIP." "WARN"
-        return $null
     }
 }
-# === Optimized WindowsUpdate Log Reading ===
+
 function Read-WindowsUpdateLog {
     param ([string]$WUFilePath)
     if (-not (Test-Path $WUFilePath)) {
         Write-Log "WindowsUpdate log file not found: $WUFilePath" "ERROR"
         return
     }
-    # Use batch processing to avoid reading the entire file into memory at once.
-    $doCollected = New-Object System.Collections.Generic.List[string]
-    $fullCollected = New-Object System.Collections.Generic.List[string]
-    # Get-Content with a higher ReadCount to read lines in chunks
+    # Use separate lists to store matched and full lines.
+    $doBuffer = New-Object System.Collections.Generic.List[string]
+    $fullBuffer = New-Object System.Collections.Generic.List[string]
+    
+    # Read the log in chunks (batch size 1000 lines)
     Get-Content $WUFilePath -ReadCount 1000 | ForEach-Object {
         foreach ($line in $_) {
-            $fullCollected.Add($line)
+            $fullBuffer.Add($line)
             if ($line -match "DeliveryOptimization|DO_|BITS") {
-                $doCollected.Add($line)
+                $doBuffer.Add($line)
             }
         }
     }
-    if ($doCollected.Count -gt 0) {
-        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = "=== DO-Related Entries ===" })
-        foreach ($doline in $doCollected) {
-            $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = $doline })
+    
+    # Clear existing buffer (if any) and add headers and collected data
+    if ($doBuffer.Count -gt 0) {
+        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = "=== DO-Related Entries ===" }) | Out-Null
+        foreach ($doline in $doBuffer) {
+            $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = $doline }) | Out-Null
         }
-        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = "=== Full Log ===" })
+        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = "=== Full Log ===" }) | Out-Null
     }
-    foreach ($line in $fullCollected) {
-        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = $line })
+    
+    foreach ($line in $fullBuffer) {
+        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = $line }) | Out-Null
     }
-    Write-Log "Parsed WindowsUpdate.log with $($doCollected.Count) DO-related entries." "INFO"
+    
+    Write-Log "Parsed WindowsUpdate.log with $($doBuffer.Count) DO-related entries." "INFO"
 }
+
 # === Diagnostics Functions ===
 function Get-DOHealthStatus {
     try {
@@ -223,6 +275,137 @@ function Test-DOConnectivity {
         }
     }
 }
+
+# === Microsoft Official Troubleshooter Integration ===
+function Invoke-OfficialDOTroubleshooter {
+    Write-Log "Running Delivery Optimization Troubleshooter..." "INFO"
+    
+    # First try to use the local script from the Scripts folder
+    $localTroubleshooterPath = Join-Path -Path $ScriptRoot -ChildPath "Scripts\DeliveryOptimizationTroubleshooter.ps1"
+    
+    if (Test-Path $localTroubleshooterPath) {
+        Write-Log "Using local DeliveryOptimizationTroubleshooter script" "INFO"
+        $tempOutputFile = Join-Path $env:TEMP "DOTroubleshooterOutput_$(Get-Date -Format yyyyMMddHHmmss).txt"
+        
+        try {
+            $scriptBlock = {
+                param($scriptPath, $outputFile)
+                $output = & $scriptPath
+                $output | Out-File -FilePath $outputFile -Encoding utf8
+            }
+            $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $localTroubleshooterPath, $tempOutputFile
+            Write-Log "Waiting for troubleshooter to complete..." "INFO"
+            $null = Wait-Job -Job $job -Timeout 300
+            
+            if ($job.State -eq 'Running') {
+                Write-Log "Troubleshooter is taking too long, stopping job..." "WARN"
+                Stop-Job -Job $job
+                Remove-Job -Job $job -Force
+                Add-Recommendation -Area "Troubleshooter" -Recommendation "The troubleshooter timed out. Try running it manually." -Severity "Important"
+                return
+            }
+            
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job -Force
+            
+            if (Test-Path $tempOutputFile) {
+                # Read the file only once
+                $allLines = Get-Content -Path $tempOutputFile
+                $troubleshooterOutput = $allLines -join "`n"
+                
+                foreach ($line in $allLines) {
+                    $Buffers.OfficialTroubleshooter.Add([PSCustomObject]@{
+                        Output = $line
+                    }) | Out-Null
+                }
+                
+                if ($troubleshooterOutput -match "Error|Warning|Failed|Issue") {
+                    Add-Recommendation -Area "Troubleshooter" -Recommendation "The troubleshooter found issues. See the Troubleshooter tab for details." -Severity "Important"
+                }
+                
+                Write-Log "Troubleshooter completed and results captured" "SUCCESS"
+                Remove-Item -Path $tempOutputFile -Force -ErrorAction SilentlyContinue
+            }
+            else {
+                Write-Log "Troubleshooter output file not found" "WARN"
+                Add-Recommendation -Area "Troubleshooter" -Recommendation "Troubleshooter ran but produced no output. Try running it manually." -Severity "Important"
+            }
+        }
+        catch {
+            Write-Log "Error running local troubleshooter: $_" "ERROR"
+            Add-Recommendation -Area "Troubleshooter" -Recommendation "Failed to run local troubleshooter. Check script permissions." -Severity "Important"
+        }
+    }
+    else {
+        Write-Log "Local troubleshooter not found, checking PowerShell Gallery version..." "INFO"
+        $troubleshooterInstalled = Get-InstalledScript -Name "DeliveryOptimizationTroubleshooter" -ErrorAction SilentlyContinue
+        
+        if (-not $troubleshooterInstalled) {
+            try {
+                Write-Log "Installing DeliveryOptimizationTroubleshooter from PowerShell Gallery..." "INFO"
+                Install-Script -Name DeliveryOptimizationTroubleshooter -Force -Scope CurrentUser -ErrorAction Stop
+                Write-Log "Successfully installed DeliveryOptimizationTroubleshooter" "SUCCESS"
+            }
+            catch {
+                Write-Log "Failed to install DeliveryOptimizationTroubleshooter: $_" "ERROR"
+                Add-Recommendation -Area "Tools" -Recommendation "Manually install DeliveryOptimizationTroubleshooter from PowerShell Gallery" -Severity "Important"
+                return
+            }
+        }
+        
+        $tempOutputFile = Join-Path $env:TEMP "DOTroubleshooterOutput_$(Get-Date -Format yyyyMMddHHmmss).txt"
+        
+        try {
+            $scriptBlock = {
+                param($outputFile)
+                $output = & DeliveryOptimizationTroubleshooter
+                $output | Out-File -FilePath $outputFile -Encoding utf8
+            }
+            $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $tempOutputFile
+            Write-Log "Waiting for troubleshooter to complete..." "INFO"
+            $null = Wait-Job -Job $job -Timeout 300
+            
+            if ($job.State -eq 'Running') {
+                Write-Log "Troubleshooter is taking too long, stopping job..." "WARN"
+                Stop-Job -Job $job
+                Remove-Job -Job $job -Force
+                Add-Recommendation -Area "Troubleshooter" -Recommendation "The official troubleshooter timed out. Try running it manually." -Severity "Important"
+                return
+            }
+            
+            Receive-Job -Job $job | Out-Null
+            Remove-Job -Job $job -Force
+            
+            if (Test-Path $tempOutputFile) {
+                # Read the output only once into memory
+                $allLines = Get-Content -Path $tempOutputFile
+                $troubleshooterOutput = $allLines -join "`n"
+                
+                foreach ($line in $allLines) {
+                    $Buffers.OfficialTroubleshooter.Add([PSCustomObject]@{
+                        Output = $line
+                    }) | Out-Null
+                }
+                
+                if ($troubleshooterOutput -match "Error|Warning|Failed|Issue") {
+                    Add-Recommendation -Area "Troubleshooter" -Recommendation "The troubleshooter found issues. See the Troubleshooter tab for details." -Severity "Important"
+                }
+                
+                Write-Log "Troubleshooter completed and results captured" "SUCCESS"
+                Remove-Item -Path $tempOutputFile -Force -ErrorAction SilentlyContinue
+            }
+            else {
+                Write-Log "Troubleshooter output file not found" "WARN"
+                Add-Recommendation -Area "Troubleshooter" -Recommendation "Troubleshooter ran but produced no output. Try running it manually." -Severity "Important"
+            }
+        }
+        catch {
+            Write-Log "Error running official troubleshooter: $_" "ERROR"
+            Add-Recommendation -Area "Troubleshooter" -Recommendation "Failed to run official troubleshooter. Try running it manually." -Severity "Important"
+        }
+    }
+}
+
 # === Excel Report ===
 function Export-DOReport {
     try {
@@ -230,12 +413,53 @@ function Export-DOReport {
             New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
         }
         $excelPath = Join-Path $OutputPath "DO_Report_$(Get-Date -Format yyyyMMdd_HHmmss).xlsx"
-        $Buffers.DOHealth        | Export-Excel -Path $excelPath -WorksheetName "DO_Health" -AutoSize
-        $Buffers.PeerTests       | Export-Excel -Path $excelPath -WorksheetName "Peer_Ports" -AutoSize -Append
-        $Buffers.Recommendations | Export-Excel -Path $excelPath -WorksheetName "Recommendations" -AutoSize -Append
+        
+        # Create Excel package
+        $excel = $Buffers.DOHealth | Export-Excel -Path $excelPath -WorksheetName "DO_Health" -AutoSize -PassThru
+        $Buffers.PeerTests | Export-Excel -Path $excelPath -WorksheetName "Peer_Ports" -AutoSize -ExcelPackage $excel -PassThru
+        $Buffers.Recommendations | Export-Excel -Path $excelPath -WorksheetName "Recommendations" -AutoSize -ExcelPackage $excel -PassThru
+        
         if ($Buffers.WindowsUpdate.Count -gt 0) {
-            $Buffers.WindowsUpdate | Export-Excel -Path $excelPath -WorksheetName "WindowsUpdate.log" -AutoSize -Append
+            $Buffers.WindowsUpdate | Export-Excel -Path $excelPath -WorksheetName "WindowsUpdate.log" -AutoSize -ExcelPackage $excel -PassThru
         }
+        
+        # Add Troubleshooter worksheet if we have data
+        if ($Buffers.OfficialTroubleshooter.Count -gt 0) {
+            $worksheet = $excel.Workbook.Worksheets.Add("Troubleshooter")
+            $row = 1
+            
+            # Add header
+            $worksheet.Cells["A$row"].Value = "Delivery Optimization Troubleshooter Results"
+            $worksheet.Cells["A$row"].Style.Font.Bold = $true
+            $worksheet.Cells["A$row"].Style.Font.Size = 14
+            $row++
+            $row++
+            
+            # Add output lines
+            foreach ($line in $Buffers.OfficialTroubleshooter) {
+                $worksheet.Cells["A$row"].Value = $line.Output
+                
+                # Highlight issues in red
+                if ($line.Output -match "Error|Warning|Failed|Issue|Critical") {
+                    $worksheet.Cells["A$row"].Style.Font.Color.SetColor([System.Drawing.Color]::Red)
+                }
+                # Highlight success in green
+                elseif ($line.Output -match "Success|Passed|Healthy|OK") {
+                    $worksheet.Cells["A$row"].Style.Font.Color.SetColor([System.Drawing.Color]::Green)
+                }
+                
+                $row++
+            }
+            
+            # Format worksheet
+            $worksheet.Column(1).Width = 120
+            $worksheet.View.FreezePanes(3, 1)
+        }
+        
+        # Save and close the Excel package
+        $excel.Save()
+        $excel.Dispose()
+        
         Write-Host "`n📊 Excel Report saved to: $excelPath" -ForegroundColor Cyan
         if ($Show -and (Test-Path $excelPath)) { 
             Invoke-Item $excelPath 
@@ -245,6 +469,7 @@ function Export-DOReport {
         Write-Host "Please ensure the ImportExcel module is properly installed." -ForegroundColor Yellow
     }
 }
+
 # === MAIN ===
 Write-Host "`n🟦 Running Delivery Optimization Troubleshooter..." -ForegroundColor Cyan
 if ($DiagnosticsZip -and (Test-Path $DiagnosticsZip)) {
@@ -256,9 +481,12 @@ if ($DiagnosticsZip -and (Test-Path $DiagnosticsZip)) {
         }
     }
 }
+
 # Run diagnostics
 Get-DOHealthStatus
 Test-DOConnectivity
+Invoke-OfficialDOTroubleshooter
+
 # Generate report
 Export-DOReport
 Remove-Jobs
