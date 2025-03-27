@@ -1,0 +1,218 @@
+<#
+.SYNOPSIS
+  Refined Delivery Optimization Troubleshooter
+.DESCRIPTION
+  - Parses Intune diagnostic ZIPs or live system
+  - Converts ETL to WindowsUpdate.log and extracts DO entries
+  - Checks peer ports (7680/3544), DO service health, registry
+  - Builds full Excel report with recommendations and health status
+.PARAMETER DiagnosticsZip
+  Optional ZIP file to extract and analyze
+.PARAMETER OutputPath
+  Path where Excel report will be saved (default: Desktop)
+.PARAMETER Show
+  Optional switch to open the Excel report after generation
+.EXAMPLE
+  .\DOTUpdateCheck.ps1 -DiagnosticsZip "C:\Diag\IntuneLog.zip" -Show #Opens the Excel report after generation
+#>
+
+param (
+    [string]$OutputPath = "$env:USERPROFILE\Desktop",
+    [switch]$Show,
+    [string]$DiagnosticsZip
+)
+
+# === Module Import ===
+$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "Modules\ImportExcel"
+if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
+    Import-Module -Name $modulePath -Force
+} else {
+    Import-Module ImportExcel
+}
+
+# === Buffers ===
+$Buffers = @{
+    Summary         = [System.Collections.ArrayList]::new()
+    Recommendations = [System.Collections.ArrayList]::new()
+    DOLogErrors     = [System.Collections.ArrayList]::new()
+    DOHealth        = [System.Collections.ArrayList]::new()
+    PeerTests       = [System.Collections.ArrayList]::new()
+    WindowsUpdate   = [System.Collections.ArrayList]::new()
+}
+
+# === Logging ===
+function Write-Log {
+    param ([string]$Message, [ValidateSet("INFO", "WARN", "ERROR", "SUCCESS")]$Level = "INFO")
+    $color = switch ($Level) {
+        "ERROR"   { "Red" }
+        "WARN"    { "Yellow" }
+        "SUCCESS" { "Green" }
+        default   { "Cyan" }
+    }
+    Write-Host "[$Level] $Message" -ForegroundColor $color
+}
+
+function Add-Recommendation {
+    param (
+        [string]$Area,
+        [string]$Recommendation,
+        [ValidateSet("Critical", "Important", "Informational")]$Severity = "Informational"
+    )
+    $Buffers.Recommendations.Add([PSCustomObject]@{
+        Area = $Area
+        Recommendation = $Recommendation
+        Severity = $Severity
+    }) | Out-Null
+}
+
+function Get-DOErrorsTable {
+    @(
+        @{ Code = "0x80D01001"; Description = "Service error"; Recommendation = "Restart Delivery Optimization service." },
+        @{ Code = "0x80D02002"; Description = "Timeout"; Recommendation = "Check internet connection or proxy." },
+        @{ Code = "0x80D02004"; Description = "Empty job"; Recommendation = "Ensure content is available." }
+    ) | ForEach-Object {
+        [PSCustomObject]@{
+            ErrorCode      = $_.Code
+            Description    = $_.Description
+            Recommendation = $_.Recommendation
+        }
+    }
+}
+
+function Remove-Jobs {
+    Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
+}
+
+# === ZIP/ETL Functions ===
+function Expand-Zip {
+    param ([string]$Path)
+    $Script:ExtractPath = Join-Path $env:TEMP "DOExtract_$([guid]::NewGuid())"
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($Path, $ExtractPath)
+    Write-Log "Extracted ZIP to: $ExtractPath" "SUCCESS"
+    return $ExtractPath
+}
+
+function Convert-WindowsUpdateLog {
+    param ($BaseFolder)
+    $etlFolder = Get-ChildItem -Path $BaseFolder -Recurse -Directory | Where-Object {
+        $_.Name -match "windir_Logs_WindowsUpdate_etl"
+    } | Select-Object -First 1
+
+    if ($etlFolder) {
+        $outLog = Join-Path $env:TEMP "WU_Converted.log"
+        Get-WindowsUpdateLog -ETLPath $etlFolder.FullName -LogPath $outLog -ErrorAction Stop
+        Write-Log "Converted WindowsUpdate ETL logs." "SUCCESS"
+        return $outLog
+    } else {
+        Write-Log "ETL folder not found in ZIP." "WARN"
+        return $null
+    }
+}
+
+function Read-WindowsUpdateLog {
+    param ([string]$WUFilePath)
+
+    $lines = Get-Content $WUFilePath -ErrorAction SilentlyContinue
+    $doLines = $lines | Where-Object { $_ -match "DeliveryOptimization|DO_|BITS" }
+
+    if ($doLines.Count -gt 0) {
+        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = "=== DO-Related Entries ===" })
+        foreach ($line in $doLines) {
+            $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = $line })
+        }
+        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = "=== Full Log ===" })
+    }
+
+    foreach ($line in $lines) {
+        $Buffers.WindowsUpdate.Add([PSCustomObject]@{ LogLine = $line })
+    }
+
+    Write-Log "Parsed WindowsUpdate.log with $($doLines.Count) DO-related entries." "INFO"
+}
+
+# === Diagnostics Functions ===
+function Get-DOHealthStatus {
+    try {
+        $status = Get-DeliveryOptimizationStatus
+        $desc = switch ($status.DODownloadMode) {
+            0 { "HTTP only" } 1 { "LAN only" } 2 { "LAN + Internet" }
+            3 { "LAN + Internet + Group" } 99 { "Fallback mode" }
+            default { "Unknown" }
+        }
+        $Buffers.DOHealth.Add([PSCustomObject]@{
+            Mode               = $status.DODownloadMode
+            Description        = $desc
+            Peers              = $status.NumberOfPeers
+            MaxCacheSizeMB     = $status.MaxCacheSize
+            CurrentCacheSizeMB = $status.CurrentCacheSize
+            PeerCachingAllowed = $status.PeerCachingAllowed
+        })
+
+        if ($status.DODownloadMode -eq 0) {
+            Add-Recommendation -Area "Config" -Recommendation "Enable peer caching for bandwidth savings." -Severity "Important"
+        } elseif ($status.DODownloadMode -eq 99) {
+            Add-Recommendation -Area "Service" -Recommendation "Restart DO service - it is in fallback mode." -Severity "Critical"
+        }
+    } catch {
+        Write-Log "Failed to get DO status: $_" "ERROR"
+    }
+}
+
+function Test-DOConnectivity {
+    $ports = @(7680, 3544)
+    $targets = @("127.0.0.1", "$env:COMPUTERNAME")
+    foreach ($port in $ports) {
+        foreach ($target in $targets) {
+            $result = Test-NetConnection -ComputerName $target -Port $port -WarningAction SilentlyContinue
+            $Buffers.PeerTests.Add([PSCustomObject]@{
+                Target     = $target
+                Port       = $port
+                TCP        = $result.TcpTestSucceeded
+                Ping       = $result.PingSucceeded
+                Status     = if ($result.TcpTestSucceeded) { "PASS" } else { "FAIL" }
+                Impact     = if (-not $result.TcpTestSucceeded) { "Peer sharing may not work." } else { "OK" }
+            })
+
+            if (-not $result.TcpTestSucceeded) {
+                Add-Recommendation -Area "Firewall" -Recommendation "Open TCP port $port for DO peer sharing." -Severity "Important"
+            }
+        }
+    }
+}
+
+# === Excel Report ===
+function Export-DOReport {
+    if (-not (Test-Path $OutputPath)) {
+        New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+    }
+
+    $excelPath = Join-Path $OutputPath "DO_Report_$(Get-Date -Format yyyyMMdd_HHmmss).xlsx"
+
+    $Buffers.DOHealth        | Export-Excel -Path $excelPath -WorksheetName "DO_Health" -AutoSize
+    $Buffers.PeerTests       | Export-Excel -Path $excelPath -WorksheetName "Peer_Ports" -AutoSize -Append
+    $Buffers.Recommendations | Export-Excel -Path $excelPath -WorksheetName "Recommendations" -AutoSize -Append
+    $Buffers.WindowsUpdate   | Export-Excel -Path $excelPath -WorksheetName "WindowsUpdate.log" -AutoSize -Append
+
+    Write-Host "`n📊 Excel Report saved to: $excelPath" -ForegroundColor Cyan
+    if ($Show) { Invoke-Item $excelPath }
+}
+
+# === MAIN ===
+Write-Host "`n🟦 Running DO Refined Troubleshooter..." -ForegroundColor Cyan
+
+if ($DiagnosticsZip -and (Test-Path $DiagnosticsZip)) {
+    $Extracted = Expand-Zip -Path $DiagnosticsZip
+    $wuLogPath = Convert-WindowsUpdateLog -BaseFolder $Extracted
+    if ($wuLogPath) { Read-WindowsUpdateLog -WUFilePath $wuLogPath }
+}
+
+# Run diagnostics
+Get-DOHealthStatus
+Test-DOConnectivity
+
+# Generate report
+Export-DOReport
+Remove-Jobs
+
+Write-Host "`n✅ Troubleshooting Complete!" -ForegroundColor Green

@@ -12,24 +12,28 @@ It outputs a detailed Excel report and CSV exports, including:
   • Microsoft Connected Cache (MCC) configuration
   • DNS-SD and DO Group ID validation
   • DO log analysis (Teams, Peer Sources, Failures)
-  • Offline DO Troubleshooter integration
+  • WindowsUpdate.log integration with ETL conversion
   • Executive summary + prioritized recommendations
 
 ================================================================================
 🚀 USAGE
 
-Run the executable (`Deploy-Do.exe`) or script (.\Deploy-Do.ps1) with:
+Run the executable (`DOTUpdateCheck.exe`) or the launcher script (.\Run-DOTUpdateCheck.ps1) with:
 
-    Deploy-Do.exe [-Show] [-OutputPath <path>]
-    .\Deploy-Do.ps1 [-Show] [-OutputPath <path>]
+    DOTUpdateCheck.exe [-Show] [-OutputPath <path>] [-DiagnosticsZip <zippath>]
+    .\Run-DOTUpdateCheck.ps1 [-Show] [-OutputPath <path>] [-DiagnosticsZip <zippath>]
 
 Examples:
-    Deploy-Do.exe
-    Deploy-Do.exe -Show
-    Deploy-Do.exe -OutputPath "C:\Reports"
+    DOTUpdateCheck.exe
+    DOTUpdateCheck.exe -Show
+    DOTUpdateCheck.exe -OutputPath "C:\Reports"
+    DOTUpdateCheck.exe -DiagnosticsZip "C:\Temp\DiagnosticsData.zip" -Show
+    
     or
-  .\Deploy-Do.ps1 -Show
-  .\Deploy-Do.ps1 -OutputPath "C:\Reports"
+    
+    .\Run-DOTUpdateCheck.ps1 -Show
+    .\Run-DOTUpdateCheck.ps1 -OutputPath "C:\Reports"
+    .\Run-DOTUpdateCheck.ps1 -DiagnosticsZip "C:\Temp\DiagnosticsData.zip" -Show
 
 PARAMETERS:
 
@@ -39,15 +43,19 @@ PARAMETERS:
     -OutputPath <string>
         Sets the output folder for reports.
         Defaults to the user's Desktop.
+        
+    -DiagnosticsZip <string>
+        Specifies a diagnostics ZIP file to extract and analyze.
+        Supports Intune diagnostics ZIPs and Windows update logs.
 
 ================================================================================
 🧾 OUTPUT FILES
 
 After execution, you'll receive:
 
-  • DO_Report_\<timestamp\>.xlsx     → Full Excel workbook with all diagnostics
-  • DO_Report_CSV_\<timestamp\>\     → CSV exports of raw diagnostic buffers
-  • DO_Report_Summary_\<timestamp\>.txt → Plain-text executive summary
+  • DO_Report_<timestamp>.xlsx     → Full Excel workbook with all diagnostics
+  • DO_Report_CSV_<timestamp>\     → CSV exports of raw diagnostic buffers
+  • DO_Report_Summary_<timestamp>.txt → Plain-text executive summary
 
 ================================================================================
 📁 EMBEDDED MODULES
@@ -74,8 +82,8 @@ The tool will auto-elevate if needed.
 📌 NOTES
 
 • Compatible with Windows PowerShell 5.1 and PowerShell 7+
-• PowerShell 7 is embedded if not installed
-• Built with Ironman Software PowerShell Pro Tools
+• PowerShell 7.4.0 is embedded and used by default
 • All files are extracted to a temporary folder and cleaned up automatically
+• Automatically converts ETL logs to WindowsUpdate.log for analysis
 
 ================================================================================
