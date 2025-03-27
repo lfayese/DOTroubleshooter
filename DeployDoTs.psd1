@@ -31,4 +31,27 @@
         "Scripts\DeliveryOptimizationTroubleshooter.ps1",
         "Modules\ImportExcel\7.8.10\ImportExcel.psm1"
     )
+    
+    # Packaging configuration
+    PackageConfiguration = @{
+        Enabled = $true
+        DotNetVersion = "net8.0"
+        PowerShellVersion = "7.4.0"
+        PackageType = "Console"
+        HideConsoleWindow = $true
+        RequireElevation = $false
+        ProductVersion = "1.0.0"
+        FileVersion = "1.0.0.0"
+        FileDescription = "Delivery Optimization Troubleshooter"
+        ProductName = "InvokeDoTs"
+        Copyright = "© 2025 BAH_ETSS"
+        CompanyName = "BAH_ETSS_WinOps"
+        Platform = "x64"
+        RuntimeIdentifier = "win-x64"
+        Host = "Default"
+        HighDPISupport = $true
+        Lightweight = $true
+        DisableQuickEdit = $true
+        Icon = "$ScriptRoot\Resources\app-icon.ico"
+    }
 }

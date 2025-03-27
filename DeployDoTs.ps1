@@ -93,13 +93,12 @@ function Expand-Resources {
     
     # Check for the Embedded class once and cache the result
     try {
-        if ($null -ne [Embedded]::GetNames()) {
+        if ([Embedded].GetType().GetMethod('GetNames')) {
             $hasEmbedded = $true
         }
-    } catch {
+    } catch [System.Management.Automation.RuntimeException] {
         $hasEmbedded = $false
-    }
-    
+    }    
     if ($hasEmbedded) {
         Write-Log "Using embedded resources..."
         $resources = [Embedded]::GetNames()
@@ -235,7 +234,7 @@ try {
     $outputPathEscaped = $OutputPath -replace "'", "''"
     $diagZipEscaped = if ($DiagnosticsZip) { $DiagnosticsZip -replace "'", "''" } else { "" }
 
-    $cmdArgs = "& '$scriptToRunEscaped' -OutputPath '$outputPathEscaped'"
+    $cmdArgs = "--% -File `"$scriptToRun`" -OutputPath `"$OutputPath`""
     if ($Show) { $cmdArgs += " -Show" }
     if ($DiagnosticsZip) { $cmdArgs += " -DiagnosticsZip '$diagZipEscaped'" }
     if ($Verbose) { $cmdArgs += " -Verbose" }
