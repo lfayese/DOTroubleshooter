@@ -23,53 +23,50 @@
      DOTUpdateCheck.exe -DiagnosticsZip "C:\Temp\DiagnosticsData.zip" -Show -OutputPath "C:\Reports" -Verbose
   
 #>
-
-param (
+param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ArgsPassed
 )
-
-# Get paths - fixed to handle both script and exe execution
-if ($PSScriptRoot) {
-    # Running as script: use PSScriptRoot
-    $Root = $PSScriptRoot
-} elseif ($MyInvocation.MyCommand.Path) {
-    # Fallback to MyInvocation if available
-    $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-} else {
-    # Running as exe: use current directory
-    $Root = (Get-Location).Path
+function Get-RootPath {
+    if ($PSScriptRoot) {
+        # Running as script using PSScriptRoot
+        return $PSScriptRoot
+    } elseif ($MyInvocation.MyCommand.Path) {
+        # Fallback to MyInvocation if available
+        return Split-Path -Parent $MyInvocation.MyCommand.Path
+    } else {
+        # Running as exe: use current directory
+        return (Get-Location).Path
+    }
 }
-
+# Get base directory for execution
+$Root = Get-RootPath
 $PwshPath   = Join-Path -Path $Root -ChildPath "pwsh\pwsh.exe"
 $MainScript = Join-Path -Path $Root -ChildPath "DOTUpdateCheck.ps1"
-
-# Add debug info
+# Logging debug info
 Write-Host "[DEBUG] Current execution path: $Root" -ForegroundColor Yellow
 Write-Host "[DEBUG] PwshPath: $PwshPath" -ForegroundColor Yellow
 Write-Host "[DEBUG] MainScript: $MainScript" -ForegroundColor Yellow
-
-# Validate
+# Validate existence of executable and main script
 if (-not (Test-Path $PwshPath)) {
     Write-Host "[ERROR] Could not find pwsh.exe at: $PwshPath" -ForegroundColor Red
     Start-Sleep -Seconds 5
     exit 1
 }
-
 if (-not (Test-Path $MainScript)) {
     Write-Host "[ERROR] Could not find DOTUpdateCheck.ps1 at: $MainScript" -ForegroundColor Red
     Start-Sleep -Seconds 5
     exit 1
 }
-
-# Convert args to string
-$argLine = $ArgsPassed -join ' '
-
 Write-Host "[INFO] Launching DOTUpdateCheck with PowerShell 7.4.0..." -ForegroundColor Cyan
 Write-Host "       Script: $MainScript"
-Write-Host "       Args:   $argLine"
+if ($ArgsPassed.Count) {
+    Write-Host "       Args:   $($ArgsPassed -join ' ')"
+}
+# Build the argument list as an array for robustness
+$psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $MainScript)
+if ($ArgsPassed) {
+    $psArgs += $ArgsPassed
+}
 
-Start-Process -FilePath $PwshPath `
-              -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$MainScript`" $argLine" `
-              -WorkingDirectory $Root `
-              -WindowStyle Normal
+Start-Process -FilePath $PwshPath -ArgumentList $psArgs -WorkingDirectory $Root -WindowStyle Normal -Wait
