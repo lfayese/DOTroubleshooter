@@ -1,6 +1,6 @@
-================================================================================
+==============================================================
 Delivery Optimization (DO) Troubleshooter
-================================================================================
+==============================================================
 
 📦 DESCRIPTION
 This utility runs a comprehensive Delivery Optimization diagnostic on the system.
@@ -15,7 +15,7 @@ It outputs a detailed Excel report and CSV exports, including:
   • WindowsUpdate.log integration with ETL conversion
   • Executive summary + prioritized recommendations
 
-================================================================================
+==============================================================
 🚀 USAGE
 
 Run the executable (`DOTUpdateCheck.exe`) or the launcher script (.\Run-DOTUpdateCheck.ps1) with:
@@ -57,19 +57,19 @@ After execution, you'll receive:
   • DO_Report_CSV_<timestamp>\     → CSV exports of raw diagnostic buffers
   • DO_Report_Summary_<timestamp>.txt → Plain-text executive summary
 
-================================================================================
+================================================================
 📁 EMBEDDED MODULES
 
 This tool includes a bundled version of the ImportExcel PowerShell module.
 No need for Internet access or prerequisites.
 
-================================================================================
+==============================================================
 🔒 PERMISSIONS
 
 Some diagnostics require Administrator privileges.
 The tool will auto-elevate if needed.
 
-================================================================================
+============================================================
 🆘 SUPPORT & DOCS
 
 • Delivery Optimization Docs:
@@ -78,7 +78,7 @@ The tool will auto-elevate if needed.
 • Troubleshooting Reference:
   [https://learn.microsoft.com/en-us/windows/deployment/optimization/waas-delivery-optimization-setup](https://learn.microsoft.com/en-us/windows/deployment/optimization/waas-delivery-optimization-setup)
 
-================================================================================
+============================================================
 📌 NOTES
 
 • Compatible with Windows PowerShell 5.1 and PowerShell 7+
@@ -86,4 +86,4 @@ The tool will auto-elevate if needed.
 • All files are extracted to a temporary folder and cleaned up automatically
 • Automatically converts ETL logs to WindowsUpdate.log for analysis
 
-================================================================================
+=============================================================

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Refined Delivery Optimization Troubleshooter
+  Delivery Optimization Troubleshooter
 .DESCRIPTION
   - Parses Intune diagnostic ZIPs or live system
   - Converts ETL to WindowsUpdate.log and extracts DO entries
@@ -22,10 +22,30 @@ param (
     [string]$DiagnosticsZip
 )
 
+# === Path Management ===
+# Ensure we have a proper root path regardless of how script is executed
+if ($PSScriptRoot) {
+    # Running as script: use PSScriptRoot
+    $ScriptRoot = $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path) {
+    # Fallback to MyInvocation if available
+    $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    # Running as exe or no path info: use current directory
+    $ScriptRoot = (Get-Location).Path
+}
+
 # === Module Import ===
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "Modules\ImportExcel"
+$modulePath = Join-Path -Path $ScriptRoot -ChildPath "Modules\ImportExcel"
+Write-Host "[DEBUG] Module path: $modulePath" -ForegroundColor Yellow
+
 if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
-    Import-Module -Name $modulePath -Force
+    try {
+        Import-Module -Name $modulePath -Force
+    } catch {
+        Write-Host "[ERROR] Failed to import ImportExcel module: $_" -ForegroundColor Red
+        Write-Host "[INFO] Will try to use the module if it's installed globally" -ForegroundColor Cyan
+    }
 } else {
     Import-Module ImportExcel
 }
@@ -87,23 +107,45 @@ function Remove-Jobs {
 function Expand-Zip {
     param ([string]$Path)
     $Script:ExtractPath = Join-Path $env:TEMP "DOExtract_$([guid]::NewGuid())"
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($Path, $ExtractPath)
-    Write-Log "Extracted ZIP to: $ExtractPath" "SUCCESS"
-    return $ExtractPath
+    
+    # Make sure the extract directory doesn't exist before trying to extract
+    if (Test-Path $Script:ExtractPath) {
+        Remove-Item -Path $Script:ExtractPath -Recurse -Force
+    }
+    
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($Path, $ExtractPath)
+        Write-Log "Extracted ZIP to: $ExtractPath" "SUCCESS"
+        return $ExtractPath
+    } catch {
+        Write-Log "Failed to extract ZIP: $_" "ERROR"
+        return $null
+    }
 }
 
 function Convert-WindowsUpdateLog {
     param ($BaseFolder)
+    
+    if (-not $BaseFolder -or -not (Test-Path $BaseFolder)) {
+        Write-Log "Invalid folder path for ETL extraction." "ERROR"
+        return $null
+    }
+    
     $etlFolder = Get-ChildItem -Path $BaseFolder -Recurse -Directory | Where-Object {
         $_.Name -match "windir_Logs_WindowsUpdate_etl"
     } | Select-Object -First 1
 
     if ($etlFolder) {
         $outLog = Join-Path $env:TEMP "WU_Converted.log"
-        Get-WindowsUpdateLog -ETLPath $etlFolder.FullName -LogPath $outLog -ErrorAction Stop
-        Write-Log "Converted WindowsUpdate ETL logs." "SUCCESS"
-        return $outLog
+        try {
+            Get-WindowsUpdateLog -ETLPath $etlFolder.FullName -LogPath $outLog -ErrorAction Stop
+            Write-Log "Converted WindowsUpdate ETL logs." "SUCCESS"
+            return $outLog
+        } catch {
+            Write-Log "Failed to convert WindowsUpdate logs: $_" "ERROR"
+            return $null
+        }
     } else {
         Write-Log "ETL folder not found in ZIP." "WARN"
         return $null
@@ -112,6 +154,11 @@ function Convert-WindowsUpdateLog {
 
 function Read-WindowsUpdateLog {
     param ([string]$WUFilePath)
+
+    if (-not (Test-Path $WUFilePath)) {
+        Write-Log "WindowsUpdate log file not found: $WUFilePath" "ERROR"
+        return
+    }
 
     $lines = Get-Content $WUFilePath -ErrorAction SilentlyContinue
     $doLines = $lines | Where-Object { $_ -match "DeliveryOptimization|DO_|BITS" }
@@ -156,6 +203,7 @@ function Get-DOHealthStatus {
         }
     } catch {
         Write-Log "Failed to get DO status: $_" "ERROR"
+        Add-Recommendation -Area "Service" -Recommendation "Ensure Delivery Optimization service is running." -Severity "Critical"
     }
 }
 
@@ -164,18 +212,30 @@ function Test-DOConnectivity {
     $targets = @("127.0.0.1", "$env:COMPUTERNAME")
     foreach ($port in $ports) {
         foreach ($target in $targets) {
-            $result = Test-NetConnection -ComputerName $target -Port $port -WarningAction SilentlyContinue
-            $Buffers.PeerTests.Add([PSCustomObject]@{
-                Target     = $target
-                Port       = $port
-                TCP        = $result.TcpTestSucceeded
-                Ping       = $result.PingSucceeded
-                Status     = if ($result.TcpTestSucceeded) { "PASS" } else { "FAIL" }
-                Impact     = if (-not $result.TcpTestSucceeded) { "Peer sharing may not work." } else { "OK" }
-            })
+            try {
+                $result = Test-NetConnection -ComputerName $target -Port $port -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+                $Buffers.PeerTests.Add([PSCustomObject]@{
+                    Target     = $target
+                    Port       = $port
+                    TCP        = $result.TcpTestSucceeded
+                    Ping       = $result.PingSucceeded
+                    Status     = if ($result.TcpTestSucceeded) { "PASS" } else { "FAIL" }
+                    Impact     = if (-not $result.TcpTestSucceeded) { "Peer sharing may not work." } else { "OK" }
+                })
 
-            if (-not $result.TcpTestSucceeded) {
-                Add-Recommendation -Area "Firewall" -Recommendation "Open TCP port $port for DO peer sharing." -Severity "Important"
+                if (-not $result.TcpTestSucceeded) {
+                    Add-Recommendation -Area "Firewall" -Recommendation "Open TCP port $port for DO peer sharing." -Severity "Important"
+                }
+            } catch {
+                Write-Log "Failed to test connectivity to $target $port - $_" "ERROR"
+                $Buffers.PeerTests.Add([PSCustomObject]@{
+                    Target     = $target
+                    Port       = $port
+                    TCP        = $false
+                    Ping       = $false
+                    Status     = "ERROR"
+                    Impact     = "Connection test failed."
+                })
             }
         }
     }
@@ -183,28 +243,41 @@ function Test-DOConnectivity {
 
 # === Excel Report ===
 function Export-DOReport {
-    if (-not (Test-Path $OutputPath)) {
-        New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+    try {
+        if (-not (Test-Path $OutputPath)) {
+            New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+        }
+
+        $excelPath = Join-Path $OutputPath "DO_Report_$(Get-Date -Format yyyyMMdd_HHmmss).xlsx"
+
+        $Buffers.DOHealth        | Export-Excel -Path $excelPath -WorksheetName "DO_Health" -AutoSize
+        $Buffers.PeerTests       | Export-Excel -Path $excelPath -WorksheetName "Peer_Ports" -AutoSize -Append
+        $Buffers.Recommendations | Export-Excel -Path $excelPath -WorksheetName "Recommendations" -AutoSize -Append
+        
+        if ($Buffers.WindowsUpdate.Count -gt 0) {
+            $Buffers.WindowsUpdate | Export-Excel -Path $excelPath -WorksheetName "WindowsUpdate.log" -AutoSize -Append
+        }
+
+        Write-Host "`n📊 Excel Report saved to: $excelPath" -ForegroundColor Cyan
+        
+        if ($Show -and (Test-Path $excelPath)) { 
+            Invoke-Item $excelPath 
+        }
+    } catch {
+        Write-Log "Failed to generate Excel report: $_" "ERROR"
+        Write-Host "Please ensure the ImportExcel module is properly installed." -ForegroundColor Yellow
     }
-
-    $excelPath = Join-Path $OutputPath "DO_Report_$(Get-Date -Format yyyyMMdd_HHmmss).xlsx"
-
-    $Buffers.DOHealth        | Export-Excel -Path $excelPath -WorksheetName "DO_Health" -AutoSize
-    $Buffers.PeerTests       | Export-Excel -Path $excelPath -WorksheetName "Peer_Ports" -AutoSize -Append
-    $Buffers.Recommendations | Export-Excel -Path $excelPath -WorksheetName "Recommendations" -AutoSize -Append
-    $Buffers.WindowsUpdate   | Export-Excel -Path $excelPath -WorksheetName "WindowsUpdate.log" -AutoSize -Append
-
-    Write-Host "`n📊 Excel Report saved to: $excelPath" -ForegroundColor Cyan
-    if ($Show) { Invoke-Item $excelPath }
 }
 
 # === MAIN ===
-Write-Host "`n🟦 Running DO Refined Troubleshooter..." -ForegroundColor Cyan
+Write-Host "`n🟦 Running Delivery Optimization Troubleshooter..." -ForegroundColor Cyan
 
 if ($DiagnosticsZip -and (Test-Path $DiagnosticsZip)) {
     $Extracted = Expand-Zip -Path $DiagnosticsZip
-    $wuLogPath = Convert-WindowsUpdateLog -BaseFolder $Extracted
-    if ($wuLogPath) { Read-WindowsUpdateLog -WUFilePath $wuLogPath }
+    if ($Extracted) {
+        $wuLogPath = Convert-WindowsUpdateLog -BaseFolder $Extracted
+        if ($wuLogPath) { Read-WindowsUpdateLog -WUFilePath $wuLogPath }
+    }
 }
 
 # Run diagnostics

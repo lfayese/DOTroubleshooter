@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Launches DORefinedTool using portable PowerShell 7.4.0 and runs the main troubleshooter script.
+  Launches Delivery Optimization Update Check tool using portable PowerShell 7.4.0 and runs the main troubleshooter script.
 
 .DESCRIPTION
   - Looks for .\pwsh\pwsh.exe (portable PS)
@@ -29,10 +29,25 @@ param (
     [string[]]$ArgsPassed
 )
 
-# Get paths
-$Root       = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Get paths - fixed to handle both script and exe execution
+if ($PSScriptRoot) {
+    # Running as script: use PSScriptRoot
+    $Root = $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path) {
+    # Fallback to MyInvocation if available
+    $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    # Running as exe: use current directory
+    $Root = (Get-Location).Path
+}
+
 $PwshPath   = Join-Path -Path $Root -ChildPath "pwsh\pwsh.exe"
-$MainScript = Join-Path -Path $Root -ChildPath "Invoke-DORefinedTroubleshooter.ps1"
+$MainScript = Join-Path -Path $Root -ChildPath "DOTUpdateCheck.ps1"
+
+# Add debug info
+Write-Host "[DEBUG] Current execution path: $Root" -ForegroundColor Yellow
+Write-Host "[DEBUG] PwshPath: $PwshPath" -ForegroundColor Yellow
+Write-Host "[DEBUG] MainScript: $MainScript" -ForegroundColor Yellow
 
 # Validate
 if (-not (Test-Path $PwshPath)) {
@@ -42,7 +57,7 @@ if (-not (Test-Path $PwshPath)) {
 }
 
 if (-not (Test-Path $MainScript)) {
-    Write-Host "[ERROR] Could not find Invoke-DORefinedTroubleshooter.ps1 at: $MainScript" -ForegroundColor Red
+    Write-Host "[ERROR] Could not find DOTUpdateCheck.ps1 at: $MainScript" -ForegroundColor Red
     Start-Sleep -Seconds 5
     exit 1
 }
@@ -50,7 +65,7 @@ if (-not (Test-Path $MainScript)) {
 # Convert args to string
 $argLine = $ArgsPassed -join ' '
 
-Write-Host "[INFO] Launching DORefinedTool with PowerShell 7.4.0..." -ForegroundColor Cyan
+Write-Host "[INFO] Launching DOTUpdateCheck with PowerShell 7.4.0..." -ForegroundColor Cyan
 Write-Host "       Script: $MainScript"
 Write-Host "       Args:   $argLine"
 
