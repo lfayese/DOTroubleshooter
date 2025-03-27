@@ -1,3 +1,45 @@
+<#
+.SYNOPSIS
+Deploys and runs the DO Troubleshooter with embedded resources and PowerShell 7.
+
+.DESCRIPTION
+This script is designed to deploy and execute the DO Troubleshooter. It handles resource extraction, PowerShell 7 detection, and elevation to administrator privileges if required. The script can run in both script mode and executable mode, supporting embedded resources or file-based resources.
+
+.PARAMETER Show
+Displays a message box indicating that the DO Troubleshooter is launching.
+
+.PARAMETER OutputPath
+Specifies the directory where the output reports and logs will be saved. Defaults to "$env:USERPROFILE\DOReports".
+
+.PARAMETER DiagnosticsZip
+Specifies the path to a diagnostics zip file to be used by the troubleshooter.
+
+.EXAMPLE
+.\Deploy-Do.ps1 -Show
+
+Launches the DO Troubleshooter with a message box and uses the default output path.
+
+.EXAMPLE
+.\Deploy-Do.ps1 -OutputPath "C:\CustomReports"
+
+Runs the DO Troubleshooter and saves the output to the specified custom directory.
+
+.EXAMPLE
+.\Deploy-Do.ps1 -DiagnosticsZip "C:\Diagnostics\Logs.zip"
+
+Runs the DO Troubleshooter with the specified diagnostics zip file.
+
+.EXAMPLE
+.\Deploy-Do.ps1 -Show -OutputPath "C:\CustomReports" -DiagnosticsZip "C:\Diagnostics\Logs.zip"
+
+Launches the DO Troubleshooter with a message box, saves the output to the specified custom directory, and uses the specified diagnostics zip file.
+
+.NOTES
+- The script requires administrator privileges to execute certain operations.
+- If PowerShell 7 is not installed, the script attempts to use an embedded version or locate it in standard installation paths.
+- The script cleans up temporary resources after execution.
+
+#>
 [CmdletBinding()]
 param (
     [switch]$Show,
