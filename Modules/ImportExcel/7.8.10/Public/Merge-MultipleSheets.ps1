@@ -1,12 +1,12 @@
-﻿function Merge-MultipleSheets {
+﻿﻿function Merge-MultipleSheets {
      [CmdletBinding()]
      [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification="False positives when initializing variable in begin block")]
      [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification="MultipleSheet would be incorrect")]
      #[Alias("Merge-MulipleSheets")] #There was a spelling error in the first release. This was there to ensure things didn't break but intelisense gave the alias first.
      param   (
          [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
-         $Path  ,
-         [int]$Startrow = 1,
+          [ValidateNotNullOrEmpty()]
+          [string[]]$Path,
 
          [String[]]$Headername,
 
