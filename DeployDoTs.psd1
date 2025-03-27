@@ -1,9 +1,9 @@
 @{
     RootModule = "DeployDoTs.ps1"
-    RequiredModules = @("ImportExcel", "PSTools")
-    ModulesToImport = @("InvokeDoTs.ps1", "DeliveryOptimizationTroubleshooter.ps1")
-    NestedModules = @("ImportExcel.psd1", "PSTools.psd1")
-    Scripts = @("DeployDoTs.ps1", "InvokeDoTs.ps1", "DeliveryOptimizationTroubleshooter.ps1")
+    RequiredModules = @("ImportExcel")
+    ModulesToImport = @("InvokeDoTs.ps1")
+    NestedModules = @("Modules\ImportExcel\7.8.10\ImportExcel.psd1")
+    Scripts = @("DeployDoTs.ps1", "InvokeDoTs.ps1", "Scripts\DeliveryOptimizationTroubleshooter.ps1")
     FunctionsToExport = @("InvokeDoTs")
     RequiredAssemblies = @()
     TypesToProcess = @()
@@ -13,20 +13,22 @@
     VariablesToExport = @()
     DscResourcesToExport = @()
     ModuleVersion = "1.0.0"
-    GUID = "12345678-1234-1234-1234-123456789012"
-    Author = "Your Name"
-    CompanyName = "Your Company"
-    Copyright = "Your Company. All rights reserved."
-    Description = "Comprehensive Delivery Optimization troubleshooting report in an Excel workbook."
+    GUID = "9ae54ad3-e2c4-45f1-a4e0-319ce0b31a6d"
+    Author = "ETSS_WinOps"
+    CompanyName = "BAH"
+    Description = "Delivery Optimization Troubleshooter for Windows - Generates comprehensive reports in Excel."
     FileList = @(
-        "Deploy-Do.ps1",
-        "Invoke-DoTroubleshooter.ps1",
-        "DeliveryOptimizationTroubleshooter.ps1",
-        "Modules\ImportExcel\ImportExcel.psd1",
-        "Modules\PSTools\PSTools.psd1"
+        "DeployDoTs.ps1",
+        "InvokeDoTs.ps1",
+        "PowerShell-7.4.0-win-x64.zip",
+        "Scripts\DeliveryOptimizationTroubleshooter.ps1",
+        "Scripts\DeliveryOptimizationTroubleshooter_InstalledScriptInfo.xml",
+        "Modules\ImportExcel\7.8.10\ImportExcel.psd1",
+        "Modules\ImportExcel\7.8.10\ImportExcel.psm1",
+        "PSTools\PsExec64.exe"
     )
     RequiredScripts = @(
-        "Modules\ImportExcel\ImportExcel.psm1",
-        "Modules\PSTools\PSTools.psm1"
+        "Scripts\DeliveryOptimizationTroubleshooter.ps1",
+        "Modules\ImportExcel\7.8.10\ImportExcel.psm1"
     )
 }
