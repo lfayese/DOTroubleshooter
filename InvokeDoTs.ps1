@@ -693,7 +693,21 @@ function Invoke-DOLogAnalysis {
 
     try {
         # Process results
-        $results = Get-DeliveryOptimizationLogAnalysis -ListConnections
+        $results = Get-DeliveryOptimizationLogAnalysis -ListConnections -ErrorAction Stop
+
+        # Handle case where no results are returned
+        if ($null -eq $results -or $results.Count -eq 0) {
+            Write-Log "No DO log connections found to analyze. This may indicate DO has not been used recently." "WARN"
+            $Buffers.Summary.Add([PSCustomObject]@{
+                Test = "DO Connection Analysis"
+                Result = "No connections found"
+                Status = "WARN"
+                Impact = "Unable to assess peer sharing effectiveness"
+            }) | Out-Null
+            
+            Add-Recommendation -Area "Diagnostics" -Recommendation "Generate new DO activity by downloading Windows updates or Microsoft Store apps." -Severity "Informational"
+            return $null
+        }
 
         # Categorize and process results
         $categorizedResults = @()
@@ -720,19 +734,24 @@ function Invoke-DOLogAnalysis {
                 }
             }
 
+            # Ensure result properties exist and have valid values
+            $bytes = if ($null -ne $result.Bytes) { $result.Bytes } else { 0 }
+            $speed = if ($null -ne $result.Speed) { $result.Speed } else { 0 }
+            $duration = if ($null -ne $result.Duration) { $result.Duration } else { 0 }
+
             $categorizedResults += [PSCustomObject]@{
                 Timestamp = $result.TimeStamp
                 Url = $result.Url
                 Result = $result.Result
-                Speed = $result.Speed
-                Duration = $result.Duration
-                Bytes = $result.Bytes
+                Speed = $speed
+                Duration = $duration
+                Bytes = $bytes
                 SuccessCategory = if ($result.Result -eq "Success") { $successCategory } else { "N/A" }
                 ErrorCategory = if ($result.Result -ne "Success") { "Connection Failed" } else { "N/A" }
             }
         }
 
-        # Calculate statistics
+        # Calculate statistics with null/error handling
         $total = $results.Count
         $success = ($results | Where-Object { $_.Result -eq "Success" }).Count
         $failed = $total - $success
@@ -740,12 +759,26 @@ function Invoke-DOLogAnalysis {
 
         Write-Log "Log analysis complete: $success successful ($successRate%), $failed failed connections" (if($successRate -gt 75) {"SUCCESS"} elseif($successRate -gt 25) {"INFO"} else {"WARN"})
 
-        # Additional statistics
+        # Additional statistics with proper error handling
         $localPeers = ($categorizedResults | Where-Object { $_.SuccessCategory -eq "Local Peer" }).Count
         $internetPeers = ($categorizedResults | Where-Object { $_.SuccessCategory -eq "Internet Peer" }).Count
-        $totalBytes = ($categorizedResults | Measure-Object -Property Bytes -Sum).Sum
+        
+        # Safe calculation of total bytes with proper error handling
+        $bytesSum = ($categorizedResults | Measure-Object -Property Bytes -Sum -ErrorAction SilentlyContinue)
+        $totalBytes = if ($null -ne $bytesSum -and $null -ne $bytesSum.Sum) { $bytesSum.Sum } else { 0 }
+        
+        # Format total bytes in a human-readable format
+        $formattedBytes = if ($totalBytes -gt 1GB) {
+            "{0:N2} GB" -f ($totalBytes / 1GB)
+        } elseif ($totalBytes -gt 1MB) {
+            "{0:N2} MB" -f ($totalBytes / 1MB)
+        } elseif ($totalBytes -gt 1KB) {
+            "{0:N2} KB" -f ($totalBytes / 1KB)
+        } else {
+            "$totalBytes bytes"
+        }
 
-        # Add summary information
+        # Add summary information with improved data
         $Buffers.Summary.Add([PSCustomObject]@{
             Test = "DO Connection Success Rate"
             Result = "$success successful of $total total connections ($successRate%)"
@@ -755,7 +788,7 @@ function Invoke-DOLogAnalysis {
 
         $Buffers.Summary.Add([PSCustomObject]@{
             Test = "Peer Source Distribution"
-            Result = "Local: $localPeers, Internet: $internetPeers"
+            Result = "Local: $localPeers, Internet: $internetPeers, Total transferred: $formattedBytes"
             Status = "INFO"
             Impact = "Data on peer source distribution"
         }) | Out-Null
@@ -764,10 +797,23 @@ function Invoke-DOLogAnalysis {
             Add-Recommendation -Area "Network" -Recommendation "Low peer connection success rate ($successRate%). Check network connectivity and firewall rules." -Severity "Important"
         }
 
+        # Safely add results to buffer
         $categorizedResults | ForEach-Object { $Buffers.SysInfo.Add($_) | Out-Null }
 
         return $results
-    } catch {
+    } 
+    catch [System.Management.Automation.CommandNotFoundException] {
+        Write-Log "DO Log Analysis commands not found. Make sure you're running with administrative privileges." "ERROR"
+        $Buffers.Summary.Add([PSCustomObject]@{
+            Test = "DO Log Analysis"
+            Result = "Commands not available"
+            Status = "ERROR"
+            Impact = "Unable to determine peer connection effectiveness"
+        }) | Out-Null
+        Add-Recommendation -Area "Execution" -Recommendation "Run the analysis with administrative privileges to access DO commands." -Severity "Critical"
+        return $null
+    }
+    catch {
         Write-Log "Log analysis failed: $_" "ERROR"
         $Buffers.Summary.Add([PSCustomObject]@{
             Test = "DO Log Analysis"
@@ -777,6 +823,7 @@ function Invoke-DOLogAnalysis {
         }) | Out-Null
 
         Add-Recommendation -Area "Diagnostics" -Recommendation "Run the analysis with administrative privileges to access DO logs." -Severity "Informational"
+        return $null
     }
 }
 

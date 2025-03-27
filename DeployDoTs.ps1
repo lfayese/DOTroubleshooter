@@ -29,8 +29,21 @@ Launches the DO Troubleshooter with a message box, saves the output to the speci
 [CmdletBinding()]
 param (
     [switch]$Show,
+    [ValidateScript({
+        if (Test-Path $_ -IsValid) { return $true }
+        throw "OutputPath is invalid: $_"
+    })]
     [string]$OutputPath = "$env:USERPROFILE\DOReports",
-    [string]$DiagnosticsZip
+    [ValidateScript({
+        if (-not $_) { return $true }
+        if (Test-Path $_ -PathType Leaf) { 
+            if ($_ -match '\.zip$|\.cab$') { return $true }
+            throw "DiagnosticsZip must be a .zip or .cab file"
+        }
+        throw "DiagnosticsZip file not found: $_"
+    })]
+    [string]$DiagnosticsZip,
+    [switch]$Verbose
 )
 # Determine the executable directory
 $ExeDirectory = if ($MyInvocation.MyCommand.Path) {
@@ -48,10 +61,23 @@ New-Item -ItemType Directory -Path $OutputPath -Force -ErrorAction SilentlyConti
 # Write-Log helper function to log messages with timestamps
 function Write-Log {
     param (
-        [string]$Message
+        [string]$Message,
+        [ValidateSet("INFO", "WARNING", "ERROR", "SUCCESS")]
+        [string]$Level = "INFO"
     )
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Tee-Object -FilePath $LogFile -Append
+    $logEntry = "$timestamp - [$Level] $Message"
+    
+    # Add color-coding to console output
+    switch ($Level) {
+        "ERROR"   { Write-Host $logEntry -ForegroundColor Red }
+        "WARNING" { Write-Host $logEntry -ForegroundColor Yellow }
+        "SUCCESS" { Write-Host $logEntry -ForegroundColor Green }
+        default   { Write-Host $logEntry -ForegroundColor Cyan }
+    }
+    
+    # Always append to log file regardless of level
+    $logEntry | Out-File -FilePath $LogFile -Append
 }
 # Checks if current process is running with administrator privileges
 function Test-IsAdministrator {
@@ -203,10 +229,16 @@ try {
         exit
     }
     # Build command arguments to run the troubleshooter
-    $scriptToRun = Join-Path $ExtractDir "Invoke-DoTroubleshooter.ps1"
-    $cmdArgs = "& '$scriptToRun' -OutputPath '$OutputPath'"
-    if ($Show)         { $cmdArgs += " -Show" }
-    if ($DiagnosticsZip){ $cmdArgs += " -DiagnosticsZip '$DiagnosticsZip'" }
+    $scriptToRun = Join-Path $ExtractDir "InvokeDoTs.ps1"
+    # Escape any single quotes in paths
+    $scriptToRunEscaped = $scriptToRun -replace "'", "''"
+    $outputPathEscaped = $OutputPath -replace "'", "''"
+    $diagZipEscaped = if ($DiagnosticsZip) { $DiagnosticsZip -replace "'", "''" } else { "" }
+
+    $cmdArgs = "& '$scriptToRunEscaped' -OutputPath '$outputPathEscaped'"
+    if ($Show) { $cmdArgs += " -Show" }
+    if ($DiagnosticsZip) { $cmdArgs += " -DiagnosticsZip '$diagZipEscaped'" }
+    if ($Verbose) { $cmdArgs += " -Verbose" }
     # Execute via PsExec if available, else directly run with pwsh
     $psExecPath = Join-Path $ExtractDir "PSTools\PsExec64.exe"
     if (Test-Path $psExecPath) {
@@ -223,7 +255,7 @@ try {
     }
 }
 catch {
-    Write-Log "FATAL ERROR: $_"
+    Write-Log "FATAL ERROR: $_" "ERROR"
     [System.Windows.Forms.MessageBox]::Show("Error: $_", "DO Troubleshooter Error", "OK", "Error")
 }
 finally
